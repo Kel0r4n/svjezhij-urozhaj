@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY --from=frontend-build /build/frontend/dist ./frontend/dist
 COPY deploy/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh && mkdir -p uploads
+RUN chmod +x /entrypoint.sh && mkdir -p uploads data
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app

@@ -3,9 +3,11 @@ set -e
 
 echo "[entrypoint] Запуск «Свежий урожай»..."
 
+mkdir -p /app/data /app/uploads
+
 if [ -z "$DATABASE_URL" ]; then
-  echo "[ERROR] Не задана переменная DATABASE_URL (PostgreSQL из панели RelaxDev)"
-  exit 1
+  export DATABASE_URL="sqlite:////app/data/shop.db"
+  echo "[entrypoint] DATABASE_URL не задан — SQLite (пробный тариф без PostgreSQL)"
 fi
 
 if [ -z "$SECRET_KEY" ] || [ "$SECRET_KEY" = "dev-secret-key-change-me" ]; then
