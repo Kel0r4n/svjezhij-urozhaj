@@ -6,12 +6,48 @@ import ProductCircleImage from './ProductCircleImage';
 export default function ProductCard({ product }) {
   const { user } = useAuth();
   const { addItem } = useCart();
-  const [qty, setQty] = useState(1);
+  const [qtyInput, setQtyInput] = useState('1');
   const [adding, setAdding] = useState(false);
   const outOfStock = product.stock === 0;
   const bgColor = product.image_bg_color || '#E6E0D4';
 
+  const resolveQty = () => {
+    const n = parseInt(qtyInput, 10);
+    if (!n || n < 1) return 1;
+    return Math.min(product.stock, n);
+  };
+
+  const handleQtyChange = (e) => {
+    const raw = e.target.value;
+    if (raw === '') {
+      setQtyInput('');
+      return;
+    }
+    if (!/^\d+$/.test(raw)) return;
+    const n = parseInt(raw, 10);
+    if (n > product.stock) {
+      setQtyInput(String(product.stock));
+      return;
+    }
+    setQtyInput(raw);
+  };
+
+  const handleQtyBlur = () => {
+    if (qtyInput === '') {
+      setQtyInput('1');
+      return;
+    }
+    const n = parseInt(qtyInput, 10);
+    if (!n || n < 1) {
+      setQtyInput('1');
+    } else if (n > product.stock) {
+      setQtyInput(String(product.stock));
+    }
+  };
+
   const handleAdd = async () => {
+    const qty = resolveQty();
+    setQtyInput(String(qty));
     setAdding(true);
     await addItem(product, qty);
     setAdding(false);
@@ -40,12 +76,13 @@ export default function ProductCard({ product }) {
         {!outOfStock && user && (
           <div className="flex gap-2 items-center">
             <input
-              type="number"
-              min={1}
-              max={product.stock}
-              value={qty}
-              onChange={(e) => setQty(Math.min(product.stock, Math.max(1, +e.target.value)))}
+              type="text"
+              inputMode="numeric"
+              value={qtyInput}
+              onChange={handleQtyChange}
+              onBlur={handleQtyBlur}
               className="input-field !w-16 !py-2 text-center"
+              aria-label="Количество"
             />
             <button
               onClick={handleAdd}

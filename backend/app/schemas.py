@@ -8,6 +8,17 @@ SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 PHONE_RE = re.compile(r"^\+?[0-9\s\-()]{10,20}$")
 
 
+def normalize_phone(value: str) -> str:
+    digits = re.sub(r"\D", "", value.strip())
+    if digits.startswith("8"):
+        digits = "7" + digits[1:]
+    elif not digits.startswith("7"):
+        digits = "7" + digits
+    if len(digits) != 11:
+        raise ValueError("Введите полный номер: +7 и 10 цифр")
+    return f"+{digits}"
+
+
 def clean_pydantic_msg(msg: str) -> str:
     return re.sub(r"^Value error,\s*", "", msg, flags=re.IGNORECASE)
 
@@ -24,10 +35,7 @@ class UserRegister(BaseModel):
     @field_validator("phone")
     @classmethod
     def valid_phone(cls, v: str) -> str:
-        cleaned = v.strip()
-        if not PHONE_RE.match(cleaned):
-            raise ValueError("Введите корректный номер телефона")
-        return cleaned
+        return normalize_phone(v)
 
 
 class UserLogin(BaseModel):
@@ -68,9 +76,7 @@ class UserUpdate(BaseModel):
     def valid_phone(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
-        if not PHONE_RE.match(v.strip()):
-            raise ValueError("Введите корректный номер телефона")
-        return v.strip()
+        return normalize_phone(v)
 
     @field_validator("telegram_username")
     @classmethod
@@ -313,8 +319,20 @@ class OrderResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AdminOrderResponse(OrderResponse):
+    user_name: str
+    user_phone: str
+
+
 class OrderListResponse(BaseModel):
     items: list[OrderResponse]
+    total: int
+    page: int
+    pages: int
+
+
+class AdminOrderListResponse(BaseModel):
+    items: list[AdminOrderResponse]
     total: int
     page: int
     pages: int

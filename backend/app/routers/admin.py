@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..database import get_db
 from ..models import Order, OrderItem, OrderStatus, Product, User, DeliveryAddress, DeliveryDate, ProductCategory
 from ..schemas import (
-    DashboardStats, OrderResponse, OrderListResponse, OrderStatusUpdate,
+    DashboardStats, AdminOrderResponse, AdminOrderListResponse, OrderStatusUpdate,
     AdminUserResponse, StockBulkUpdateRequest, ProductResponse, SalesAnalyticsResponse,
     DeliveryAddressCreate, DeliveryAddressResponse, DeliveryDateCreate, DeliveryDateResponse,
     DayDetailResponse, CategoryCreate, CategoryUpdate, CategoryResponse,
@@ -15,6 +15,22 @@ from ..auth import get_current_admin
 from ..utils import get_dashboard_stats, get_sales_analytics, get_day_detail
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _admin_order_response(order: Order) -> AdminOrderResponse:
+    user = order.user
+    return AdminOrderResponse(
+        id=order.id,
+        user_id=order.user_id,
+        user_name=user.full_name if user else "—",
+        user_phone=user.phone if user else "—",
+        status=order.status.value if isinstance(order.status, OrderStatus) else order.status,
+        address=order.address,
+        delivery_date=order.delivery_date,
+        total=order.total,
+        created_at=order.created_at,
+        items=order.items,
+    )
 
 
 @router.get("/dashboard", response_model=DashboardStats)
@@ -156,7 +172,7 @@ def delete_delivery_date(date_id: int, db: Session = Depends(get_db), _=Depends(
     db.commit()
 
 
-@router.get("/orders", response_model=OrderListResponse)
+@router.get("/orders", response_model=AdminOrderListResponse)
 def admin_list_orders(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
@@ -173,35 +189,59 @@ def admin_list_orders(
             pass
     if search:
         from sqlalchemy import or_
-        query = query.filter(or_(User.email.ilike(f"%{search}%"), User.phone.ilike(f"%{search}%")))
+        like = f"%{search}%"
+        query = query.filter(
+            or_(
+                User.phone.ilike(like),
+                User.email.ilike(like),
+                User.first_name.ilike(like),
+                User.last_name.ilike(like),
+                User.patronymic.ilike(like),
+            )
+        )
     total = query.count()
     pages = max(1, math.ceil(total / per_page))
     orders = (
-        query.options(joinedload(Order.items))
+        query.options(joinedload(Order.items), joinedload(Order.user))
         .order_by(Order.created_at.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
         .all()
     )
-    return OrderListResponse(items=orders, total=total, page=page, pages=pages)
+    return AdminOrderListResponse(
+        items=[_admin_order_response(o) for o in orders],
+        total=total,
+        page=page,
+        pages=pages,
+    )
 
 
-@router.get("/orders/{order_id}", response_model=OrderResponse)
+@router.get("/orders/{order_id}", response_model=AdminOrderResponse)
 def admin_get_order(order_id: int, db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    order = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
+    order = (
+        db.query(Order)
+        .options(joinedload(Order.items), joinedload(Order.user))
+        .filter(Order.id == order_id)
+        .first()
+    )
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
-    return order
+    return _admin_order_response(order)
 
 
-@router.patch("/orders/{order_id}/status", response_model=OrderResponse)
+@router.patch("/orders/{order_id}/status", response_model=AdminOrderResponse)
 def update_order_status(
     order_id: int,
     data: OrderStatusUpdate,
     db: Session = Depends(get_db),
     _=Depends(get_current_admin),
 ):
-    order = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
+    order = (
+        db.query(Order)
+        .options(joinedload(Order.items), joinedload(Order.user))
+        .filter(Order.id == order_id)
+        .first()
+    )
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
 
@@ -219,8 +259,13 @@ def update_order_status(
 
     order.status = new_status
     db.commit()
-    db.refresh(order)
-    return order
+    order = (
+        db.query(Order)
+        .options(joinedload(Order.items), joinedload(Order.user))
+        .filter(Order.id == order_id)
+        .first()
+    )
+    return _admin_order_response(order)
 
 
 @router.get("/users", response_model=list[AdminUserResponse])

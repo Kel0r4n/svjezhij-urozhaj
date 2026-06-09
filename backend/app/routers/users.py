@@ -6,6 +6,7 @@ from ..models import User
 from ..schemas import (
     UserRegister, UserLogin, TokenResponse, RefreshTokenRequest,
     ForgotPasswordRequest, ForgotPasswordResponse, UserUpdate, UserResponse,
+    normalize_phone,
 )
 from ..auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
@@ -41,7 +42,11 @@ def _find_user_by_login(db: Session, login: str) -> User | None:
     value = login.strip()
     if "@" in value:
         return db.query(User).filter(User.email.ilike(value)).first()
-    return db.query(User).filter(User.phone == value).first()
+    try:
+        phone = normalize_phone(value)
+    except ValueError:
+        phone = value
+    return db.query(User).filter(User.phone == phone).first()
 
 
 @router.post("/login", response_model=TokenResponse)

@@ -2,13 +2,15 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+import PhoneInput from '../components/PhoneInput';
+import { isRuPhoneComplete, normalizeRuPhone } from '../utils/phone';
 
 export default function Register() {
   const [form, setForm] = useState({
     first_name: '',
     last_name: '',
     patronymic: '',
-    phone: '',
+    phone: '+7 ',
     email: '',
     password: '',
   });
@@ -20,9 +22,13 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!isRuPhoneComplete(form.phone)) {
+      toast.error('Введите полный номер: +7 и 10 цифр');
+      return;
+    }
     setLoading(true);
     try {
-      await register(form);
+      await register({ ...form, phone: normalizeRuPhone(form.phone) });
       toast.success('Регистрация успешна!');
       navigate('/');
     } catch (err) {
@@ -54,7 +60,12 @@ export default function Register() {
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Телефон *</label>
-            <input name="phone" type="tel" required value={form.phone} onChange={handleChange} className="input-field" placeholder="+79001234567" />
+            <PhoneInput
+              name="phone"
+              required
+              value={form.phone}
+              onChange={(phone) => setForm({ ...form, phone })}
+            />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Email</label>

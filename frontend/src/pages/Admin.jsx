@@ -605,15 +605,15 @@ export default function Admin() {
 
           <div className="space-y-2">
             {adminCategories.map((c) => (
-              <div key={c.id} className={`card p-4 flex items-center justify-between gap-4 ${!c.is_active ? 'opacity-50' : ''}`}>
-                <div className="flex items-center gap-3">
+              <div key={c.id} className={`admin-list-row ${!c.is_active ? 'opacity-50' : ''}`}>
+                <div className="admin-list-row__content gap-3">
                   <span className="w-6 h-6 rounded-full border border-sand shrink-0" style={{ backgroundColor: c.chart_color }} />
                   <div>
                     <span className="font-medium">{c.label}</span>
                     <span className="text-stone/50 text-sm ml-2">({c.slug})</span>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="admin-list-row__actions">
                   <button onClick={() => setCategoryForm({ ...c })} className="text-sm text-accent hover:underline">Изменить</button>
                   <button
                     onClick={() => api.deleteCategory(c.id).then(loadAdminCategories).catch((e) => toast.error(e.message))}
@@ -642,9 +642,11 @@ export default function Admin() {
           </form>
           <div className="space-y-2">
             {addresses.map((a) => (
-              <div key={a.id} className={`card p-4 flex items-center justify-between ${!a.is_active ? 'opacity-50' : ''}`}>
-                <span>{a.address}</span>
-                <div className="flex gap-2">
+              <div key={a.id} className={`admin-list-row ${!a.is_active ? 'opacity-50' : ''}`}>
+                <div className="admin-list-row__content">
+                  <span>{a.address}</span>
+                </div>
+                <div className="admin-list-row__actions">
                   <button onClick={() => api.toggleAddress(a.id).then(loadAddresses).catch((e) => toast.error(e.message))} className="text-sm text-accent hover:underline">
                     {a.is_active ? 'Скрыть' : 'Показать'}
                   </button>
@@ -672,9 +674,11 @@ export default function Admin() {
           </form>
           <div className="space-y-2">
             {deliveryDates.map((d) => (
-              <div key={d.id} className={`card p-4 flex items-center justify-between ${!d.is_active ? 'opacity-50' : ''}`}>
-                <span>{formatDate(d.delivery_date)}</span>
-                <div className="flex gap-2">
+              <div key={d.id} className={`admin-list-row ${!d.is_active ? 'opacity-50' : ''}`}>
+                <div className="admin-list-row__content">
+                  <span>{formatDate(d.delivery_date)}</span>
+                </div>
+                <div className="admin-list-row__actions">
                   <button onClick={() => api.toggleDeliveryDate(d.id).then(loadDeliveryDates).catch((e) => toast.error(e.message))} className="text-sm text-accent hover:underline">
                     {d.is_active ? 'Скрыть' : 'Показать'}
                   </button>
@@ -695,35 +699,43 @@ export default function Admin() {
               <option value="">Все статусы</option>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
             </select>
-            <input placeholder="Поиск по телефону..." value={orderFilter.search} onChange={(e) => setOrderFilter({ ...orderFilter, search: e.target.value })} className="input-field max-w-xs" />
+            <input
+              placeholder="Поиск по имени или телефону..."
+              value={orderFilter.search}
+              onChange={(e) => setOrderFilter({ ...orderFilter, search: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && loadOrders()}
+              className="input-field max-w-xs"
+            />
             <button onClick={() => loadOrders()} className="btn-secondary !px-4 !py-2">Найти</button>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full card">
               <thead>
-                <tr className="border-b border-sand text-left text-sm">
-                  <th className="p-4">№</th>
-                  <th className="p-4">User ID</th>
-                  <th className="p-4">Сумма</th>
-                  <th className="p-4">Статус</th>
-                  <th className="p-4">Дата</th>
-                  <th className="p-4">Действия</th>
+                <tr className="border-b border-sand text-sm">
+                  <th className="p-4 text-center">№</th>
+                  <th className="p-4 text-center">Клиент</th>
+                  <th className="p-4 text-center">Телефон</th>
+                  <th className="p-4 text-center">Сумма</th>
+                  <th className="p-4 text-center">Статус</th>
+                  <th className="p-4 text-center">Дата</th>
+                  <th className="p-4 text-center">Действия</th>
                 </tr>
               </thead>
               <tbody>
                 {orders.items.map((o) => (
                   <tr key={o.id} className="border-b border-sand/50 hover:bg-sand/20">
-                    <td className="p-4">{o.id}</td>
-                    <td className="p-4">{o.user_id}</td>
-                    <td className="p-4">{o.total.toLocaleString('ru-RU')} ₽</td>
-                    <td className="p-4">
+                    <td className="p-4 text-center">{o.id}</td>
+                    <td className="p-4 text-center">{o.user_name || '—'}</td>
+                    <td className="p-4 text-center whitespace-nowrap">{o.user_phone || '—'}</td>
+                    <td className="p-4 text-center">{o.total.toLocaleString('ru-RU')} ₽</td>
+                    <td className="p-4 text-center">
                       <select value={o.status} onChange={(e) => handleStatusChange(o.id, e.target.value)} className="input-field !py-1 !px-2 text-sm" disabled={o.status === 'cancelled'}>
                         {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
                       </select>
                     </td>
-                    <td className="p-4 text-sm">{new Date(o.created_at).toLocaleString('ru-RU')}</td>
-                    <td className="p-4">
+                    <td className="p-4 text-sm text-center">{new Date(o.created_at).toLocaleString('ru-RU')}</td>
+                    <td className="p-4 text-center">
                       <button onClick={() => setSelectedOrder(o)} className="text-accent hover:underline text-sm">Детали</button>
                     </td>
                   </tr>
@@ -736,6 +748,7 @@ export default function Admin() {
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={() => setSelectedOrder(null)}>
               <div className="card p-6 max-w-lg w-full animate-slide-up" onClick={(e) => e.stopPropagation()}>
                 <h3 className="font-semibold mb-4">Заказ №{selectedOrder.id}</h3>
+                <p className="text-sm mb-2">👤 {selectedOrder.user_name || '—'} · {selectedOrder.user_phone || '—'}</p>
                 <p className="text-sm mb-2">📍 {selectedOrder.address}</p>
                 <p className="text-sm mb-4">📅 {formatDate(selectedOrder.delivery_date)}</p>
                 <div className="space-y-1 mb-4">
