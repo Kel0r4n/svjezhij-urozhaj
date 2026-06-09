@@ -549,7 +549,7 @@ export default function Admin() {
       )}
 
       {tab === 'categories' && !loading && (
-        <div className="animate-fade-in max-w-2xl">
+        <div className="animate-fade-in max-w-2xl mx-auto w-full">
           <button onClick={() => setCategoryForm({ ...emptyCategory })} className="btn-primary !px-4 !py-2 mb-6">
             + Добавить категорию
           </button>
@@ -605,15 +605,15 @@ export default function Admin() {
 
           <div className="space-y-2">
             {adminCategories.map((c) => (
-              <div key={c.id} className={`admin-list-row ${!c.is_active ? 'opacity-50' : ''}`}>
-                <div className="admin-list-row__content gap-3">
+              <div key={c.id} className={`card p-4 flex items-center justify-between gap-4 ${!c.is_active ? 'opacity-50' : ''}`}>
+                <div className="flex items-center gap-3 min-w-0 text-left">
                   <span className="w-6 h-6 rounded-full border border-sand shrink-0" style={{ backgroundColor: c.chart_color }} />
                   <div>
                     <span className="font-medium">{c.label}</span>
                     <span className="text-stone/50 text-sm ml-2">({c.slug})</span>
                   </div>
                 </div>
-                <div className="admin-list-row__actions">
+                <div className="flex gap-2 shrink-0">
                   <button onClick={() => setCategoryForm({ ...c })} className="text-sm text-accent hover:underline">Изменить</button>
                   <button
                     onClick={() => api.deleteCategory(c.id).then(loadAdminCategories).catch((e) => toast.error(e.message))}
@@ -629,7 +629,7 @@ export default function Admin() {
       )}
 
       {tab === 'addresses' && !loading && (
-        <div className="animate-fade-in max-w-2xl">
+        <div className="animate-fade-in max-w-2xl mx-auto w-full">
           <form onSubmit={handleAddAddress} className="card p-6 mb-6 flex gap-3">
             <input
               required
@@ -642,11 +642,9 @@ export default function Admin() {
           </form>
           <div className="space-y-2">
             {addresses.map((a) => (
-              <div key={a.id} className={`admin-list-row ${!a.is_active ? 'opacity-50' : ''}`}>
-                <div className="admin-list-row__content">
-                  <span>{a.address}</span>
-                </div>
-                <div className="admin-list-row__actions">
+              <div key={a.id} className={`card p-4 flex items-center justify-between gap-4 ${!a.is_active ? 'opacity-50' : ''}`}>
+                <span className="min-w-0 text-left">{a.address}</span>
+                <div className="flex gap-2 shrink-0">
                   <button onClick={() => api.toggleAddress(a.id).then(loadAddresses).catch((e) => toast.error(e.message))} className="text-sm text-accent hover:underline">
                     {a.is_active ? 'Скрыть' : 'Показать'}
                   </button>
@@ -661,7 +659,7 @@ export default function Admin() {
       )}
 
       {tab === 'dates' && !loading && (
-        <div className="animate-fade-in max-w-2xl">
+        <div className="animate-fade-in max-w-2xl mx-auto w-full">
           <form onSubmit={handleAddDate} className="card p-6 mb-6 flex gap-3">
             <input
               type="date"
@@ -674,11 +672,9 @@ export default function Admin() {
           </form>
           <div className="space-y-2">
             {deliveryDates.map((d) => (
-              <div key={d.id} className={`admin-list-row ${!d.is_active ? 'opacity-50' : ''}`}>
-                <div className="admin-list-row__content">
-                  <span>{formatDate(d.delivery_date)}</span>
-                </div>
-                <div className="admin-list-row__actions">
+              <div key={d.id} className={`card p-4 flex items-center justify-between gap-4 ${!d.is_active ? 'opacity-50' : ''}`}>
+                <span className="min-w-0 text-left">{formatDate(d.delivery_date)}</span>
+                <div className="flex gap-2 shrink-0">
                   <button onClick={() => api.toggleDeliveryDate(d.id).then(loadDeliveryDates).catch((e) => toast.error(e.message))} className="text-sm text-accent hover:underline">
                     {d.is_active ? 'Скрыть' : 'Показать'}
                   </button>
