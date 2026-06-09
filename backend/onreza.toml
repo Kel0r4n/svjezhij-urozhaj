@@ -1,0 +1,14 @@
+# Миграции PostgreSQL на ONREZA (если БД привязана к проекту):
+#   nrz db migrate apply
+# API (FastAPI) на ONREZA не деплоится — используйте VPS или Amvera (см. DEPLOY.md).
+
+[migrations]
+dir = "migrations"
+
+[env]
+strict = true
+
+[env.declarations]
+DATABASE_URL = "sensitive"
+SECRET_KEY = "sensitive"
+CORS_ORIGINS = "plain"

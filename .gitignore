@@ -1,0 +1,14 @@
+.env
+backend/.env
+frontend/.env
+frontend/.env.local
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/shop.db
+backend/uploads/
+frontend/node_modules/
+frontend/dist/
+.onreza/
+.pytest_cache/
+*.pyc

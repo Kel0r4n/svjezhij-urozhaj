@@ -1,0 +1,19 @@
+# После регистрации: cd frontend && nrz init && nrz detect --save
+# Деплой статики: nrz deploy --prod
+
+[project]
+name = "svjezhij-urozhaj"
+
+[build]
+install_command = "npm ci"
+command = "npm run build"
+output_directory = "dist"
+
+[deploy]
+compute = "static"
+
+[env]
+strict = true
+
+[env.declarations]
+VITE_API_URL = "plain"

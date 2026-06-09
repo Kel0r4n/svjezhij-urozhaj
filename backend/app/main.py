@@ -1,0 +1,125 @@
+import os
+import re
+from pathlib import Path
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import inspect, text
+
+from .database import Base, engine, settings
+from .routers import admin, cart, categories, delivery, orders, products, users
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+UPLOADS_DIR = APP_ROOT / "uploads"
+FRONTEND_DIST = APP_ROOT / "frontend" / "dist"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def serve_frontend_enabled() -> bool:
+    val = os.getenv("SERVE_FRONTEND", "").strip().lower()
+    return val in ("1", "true", "yes") and FRONTEND_DIST.is_dir()
+
+
+def _migrate_product_image_columns():
+    insp = inspect(engine)
+    if "products" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("products")}
+    alters = []
+    if "image_zoom" not in existing:
+        alters.append("ALTER TABLE products ADD COLUMN image_zoom FLOAT DEFAULT 1.0")
+    if "image_pan_x" not in existing:
+        alters.append("ALTER TABLE products ADD COLUMN image_pan_x FLOAT DEFAULT 0.0")
+    if "image_pan_y" not in existing:
+        alters.append("ALTER TABLE products ADD COLUMN image_pan_y FLOAT DEFAULT 0.0")
+    if not alters:
+        return
+    with engine.begin() as conn:
+        for sql in alters:
+            conn.execute(text(sql))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    _migrate_product_image_columns()
+    if serve_frontend_enabled():
+        print(f"[OK] Публичный режим: сайт + API ({FRONTEND_DIST})")
+    yield
+
+
+app = FastAPI(title="Свежий урожай", version="2.0.0", lifespan=lifespan)
+
+origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+
+if FRONTEND_DIST.is_dir():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend_assets")
+
+
+@app.middleware("http")
+async def strip_api_prefix(request: Request, call_next):
+    if serve_frontend_enabled():
+        path = request.scope["path"]
+        if path == "/api":
+            request.scope["path"] = "/"
+        elif path.startswith("/api/"):
+            request.scope["path"] = path[4:]
+    return await call_next(request)
+
+app.include_router(users.router)
+app.include_router(users.profile_router)
+app.include_router(products.router)
+app.include_router(cart.router)
+app.include_router(orders.router)
+app.include_router(admin.router)
+app.include_router(delivery.router)
+app.include_router(categories.router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, exc: RequestValidationError):
+    messages = []
+    for err in exc.errors():
+        msg = err.get("msg", "Ошибка валидации")
+        msg = re.sub(r"^Value error,\s*", "", msg, flags=re.IGNORECASE)
+        messages.append(msg)
+    return JSONResponse(status_code=422, content={"detail": messages[0] if len(messages) == 1 else messages})
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/")
+async def root():
+    if serve_frontend_enabled():
+        return FileResponse(FRONTEND_DIST / "index.html")
+    return {"message": "Свежий урожай API", "docs": "/docs"}
+
+
+if FRONTEND_DIST.is_dir():
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        if not serve_frontend_enabled():
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(FRONTEND_DIST / "index.html")
