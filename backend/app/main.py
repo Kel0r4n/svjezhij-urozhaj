@@ -19,7 +19,16 @@ from .routers import admin, cart, categories, delivery, orders, products, users
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 UPLOADS_DIR = APP_ROOT / "uploads"
-FRONTEND_DIST = APP_ROOT / "frontend" / "dist"
+
+
+def _resolve_frontend_dist() -> Path:
+    for candidate in (APP_ROOT / "frontend" / "dist", APP_ROOT.parent / "frontend" / "dist"):
+        if candidate.is_dir():
+            return candidate
+    return APP_ROOT / "frontend" / "dist"
+
+
+FRONTEND_DIST = _resolve_frontend_dist()
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -61,12 +70,12 @@ if FRONTEND_DIST.is_dir():
 
 @app.middleware("http")
 async def strip_api_prefix(request: Request, call_next):
-    if serve_frontend_enabled():
-        path = request.scope["path"]
-        if path == "/api":
-            request.scope["path"] = "/"
-        elif path.startswith("/api/"):
-            request.scope["path"] = path[4:]
+    """Фронтенд в проде ходит на /api/* (VITE_API_URL=/api) — всегда снимаем префикс."""
+    path = request.scope["path"]
+    if path == "/api":
+        request.scope["path"] = "/"
+    elif path.startswith("/api/"):
+        request.scope["path"] = path[4:]
     return await call_next(request)
 
 app.include_router(users.router)
@@ -80,7 +89,7 @@ app.include_router(categories.router)
 
 
 _API_PREFIXES = (
-    "admin", "users", "products", "orders", "cart", "delivery", "categories",
+    "api", "admin", "users", "products", "orders", "cart", "delivery", "categories",
     "health", "docs", "openapi.json", "uploads", "auth",
 )
 
