@@ -4,7 +4,8 @@
 #   VPS_HOST      — IP или домен сервера
 #   VPS_USER      — например root или deploy
 #   VPS_SSH_KEY   — приватный SSH-ключ (полностью, с BEGIN/END)
-#   VPS_APP_PATH  — путь к проекту на сервере, например /opt/svjezhij-urozhaj
+#   VPS_APP_PATH  — /opt/svjezhij-urozhaj
+#   VPS_PORT      — (опционально) 22 по умолчанию
 
 name: Deploy to VPS
 
@@ -23,9 +24,11 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             set -e
             cd "${{ secrets.VPS_APP_PATH }}"
+            test -f .env || { echo "Нет .env на сервере — создайте вручную один раз"; exit 1; }
             git fetch origin main
             git reset --hard origin/main
             docker compose -f docker-compose.vps.yml up -d --build

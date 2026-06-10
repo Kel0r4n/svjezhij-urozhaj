@@ -139,10 +139,11 @@ chmod 600 ~/.ssh/authorized_keys
 
 | Секрет | Значение |
 |--------|----------|
-| `VPS_HOST` | IP или домен сервера |
-| `VPS_USER` | `root` или `deploy` |
-| `VPS_SSH_KEY` | содержимое `vps_deploy` (приватный ключ) |
+| `VPS_HOST` | `89.125.121.37` или ваш домен |
+| `VPS_USER` | `root` |
+| `VPS_SSH_KEY` | содержимое `vps_deploy` (приватный ключ, весь файл) |
 | `VPS_APP_PATH` | `/opt/svjezhij-urozhaj` |
+| `VPS_PORT` | `22` (опционально, если SSH не стандартный) |
 
 ### 2.3. Как это работает
 

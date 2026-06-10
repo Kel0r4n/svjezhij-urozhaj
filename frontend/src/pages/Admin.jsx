@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api';
 import Spinner from '../components/Spinner';
 import ConfirmModal from '../components/ConfirmModal';
@@ -7,6 +7,8 @@ import DayDetailChart from '../components/DayDetailChart';
 import ColorField from '../components/ColorField';
 import ProductCircleImage from '../components/ProductCircleImage';
 import ProductImageEditor from '../components/ProductImageEditor';
+import DateRangePicker from '../components/DateRangePicker';
+import { getCurrentWeekRange, shiftWeek, formatRangeLabel } from '../utils/dates';
 import toast from 'react-hot-toast';
 
 const TABS = [
@@ -64,12 +66,19 @@ export default function Admin() {
   const [deliveryDates, setDeliveryDates] = useState([]);
   const [newDate, setNewDate] = useState('');
 
-  const [orders, setOrders] = useState({ items: [], page: 1, pages: 1 });
-  const [orderFilter, setOrderFilter] = useState({ status: '', search: '' });
+  const [orders, setOrders] = useState({ items: [], page: 1, pages: 1, total: 0 });
+  const [orderFilter, setOrderFilter] = useState(() => {
+    const week = getCurrentWeekRange();
+    return { status: '', search: '', address: '', delivery_from: week.from, delivery_to: week.to };
+  });
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const calendarBtnRef = useRef(null);
 
   const [users, setUsers] = useState([]);
   const [userSearch, setUserSearch] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [userDetailLoading, setUserDetailLoading] = useState(false);
 
   const [stockItems, setStockItems] = useState([]);
 
@@ -119,13 +128,32 @@ export default function Admin() {
 
   const loadOrders = (page = 1) => {
     setLoading(true);
-    const params = { page };
+    const params = {
+      page,
+      delivery_from: orderFilter.delivery_from,
+      delivery_to: orderFilter.delivery_to,
+    };
     if (orderFilter.status) params.status = orderFilter.status;
     if (orderFilter.search) params.search = orderFilter.search;
+    if (orderFilter.address) params.address = orderFilter.address;
     api.getAdminOrders(params)
       .then(setOrders)
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
+  };
+
+  const openUserDetail = (userId) => {
+    setUserDetailLoading(true);
+    setSelectedUser(null);
+    api.getAdminUser(userId)
+      .then(setSelectedUser)
+      .catch((e) => toast.error(e.message))
+      .finally(() => setUserDetailLoading(false));
+  };
+
+  const shiftOrderWeek = (delta) => {
+    const next = shiftWeek(orderFilter.delivery_from, delta);
+    setOrderFilter((f) => ({ ...f, delivery_from: next.from, delivery_to: next.to }));
   };
 
   const loadUsers = () => {
@@ -169,7 +197,7 @@ export default function Admin() {
     if (tab === 'dashboard') loadAdminCategories();
     if (tab === 'addresses') loadAddresses();
     if (tab === 'dates') loadDeliveryDates();
-    if (tab === 'orders') loadOrders();
+    if (tab === 'orders') loadAddresses();
     if (tab === 'users') loadUsers();
     if (tab === 'stock') loadStock();
   }, [tab]);
@@ -177,6 +205,10 @@ export default function Admin() {
   useEffect(() => {
     if (tab === 'dashboard') loadSalesAnalytics();
   }, [tab, loadSalesAnalytics]);
+
+  useEffect(() => {
+    if (tab === 'orders') loadOrders();
+  }, [tab, orderFilter.delivery_from, orderFilter.delivery_to]);
 
   useEffect(() => {
     if (selectedDay) loadDayDetail(selectedDay);
@@ -690,7 +722,67 @@ export default function Admin() {
 
       {tab === 'orders' && !loading && (
         <div className="animate-fade-in">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => shiftOrderWeek(-1)}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-sand/70 text-stone transition hover:bg-warm"
+              title="Предыдущая неделя"
+            >
+              ‹
+            </button>
+            <span className="min-w-[10rem] text-center text-sm font-medium text-stone">
+              {formatRangeLabel(orderFilter.delivery_from, orderFilter.delivery_to)}
+            </span>
+            <button
+              type="button"
+              onClick={() => shiftOrderWeek(1)}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-sand/70 text-stone transition hover:bg-warm"
+              title="Следующая неделя"
+            >
+              ›
+            </button>
+            <button
+              ref={calendarBtnRef}
+              type="button"
+              onClick={() => setCalendarOpen((v) => !v)}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                calendarOpen
+                  ? 'border-accent bg-accent/20 text-accent'
+                  : 'border-sand bg-[#FDF8F3] text-stone hover:border-accent/50 hover:bg-accent/10'
+              }`}
+              title="Выбрать период"
+              aria-label="Календарь"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+              </svg>
+            </button>
+            <DateRangePicker
+              open={calendarOpen}
+              onClose={() => setCalendarOpen(false)}
+              anchorRef={calendarBtnRef}
+              value={{ from: orderFilter.delivery_from, to: orderFilter.delivery_to }}
+              onChange={({ from, to }) => {
+                setOrderFilter((f) => ({ ...f, delivery_from: from, delivery_to: to }));
+              }}
+            />
+            <span className="text-xs text-stone/70">
+              {orders.total} заказ(ов) за период
+            </span>
+          </div>
+
           <div className="flex flex-wrap gap-3 mb-6">
+            <select
+              value={orderFilter.address}
+              onChange={(e) => setOrderFilter({ ...orderFilter, address: e.target.value })}
+              className="input-field max-w-md min-w-[200px]"
+            >
+              <option value="">Все адреса доставки</option>
+              {addresses.map((a) => (
+                <option key={a.id} value={a.address}>{a.address}</option>
+              ))}
+            </select>
             <select value={orderFilter.status} onChange={(e) => setOrderFilter({ ...orderFilter, status: e.target.value })} className="input-field max-w-xs">
               <option value="">Все статусы</option>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
@@ -712,18 +804,29 @@ export default function Admin() {
                   <th className="p-4 text-center">№</th>
                   <th className="p-4 text-center">Клиент</th>
                   <th className="p-4 text-center">Телефон</th>
+                  <th className="p-4 text-center">Адрес</th>
+                  <th className="p-4 text-center">Доставка</th>
                   <th className="p-4 text-center">Сумма</th>
                   <th className="p-4 text-center">Статус</th>
-                  <th className="p-4 text-center">Дата</th>
+                  <th className="p-4 text-center">Создан</th>
                   <th className="p-4 text-center">Действия</th>
                 </tr>
               </thead>
               <tbody>
+                {orders.items.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="p-8 text-center text-stone/70">
+                      Нет заказов за выбранный период
+                    </td>
+                  </tr>
+                )}
                 {orders.items.map((o) => (
                   <tr key={o.id} className="border-b border-sand/50 hover:bg-sand/20">
                     <td className="p-4 text-center">{o.id}</td>
                     <td className="p-4 text-center">{o.user_name || '—'}</td>
                     <td className="p-4 text-center whitespace-nowrap">{o.user_phone || '—'}</td>
+                    <td className="p-4 text-center text-sm max-w-[180px] truncate" title={o.address}>{o.address}</td>
+                    <td className="p-4 text-sm text-center whitespace-nowrap">{formatDate(o.delivery_date)}</td>
                     <td className="p-4 text-center">{o.total.toLocaleString('ru-RU')} ₽</td>
                     <td className="p-4 text-center">
                       <select value={o.status} onChange={(e) => handleStatusChange(o.id, e.target.value)} className="input-field !py-1 !px-2 text-sm" disabled={o.status === 'cancelled'}>
@@ -739,6 +842,28 @@ export default function Admin() {
               </tbody>
             </table>
           </div>
+
+          {orders.pages > 1 && (
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                disabled={orders.page <= 1}
+                onClick={() => loadOrders(orders.page - 1)}
+                className="btn-secondary !px-4 !py-2 disabled:opacity-40"
+              >
+                ← Назад
+              </button>
+              <span className="text-sm text-stone">{orders.page} / {orders.pages}</span>
+              <button
+                type="button"
+                disabled={orders.page >= orders.pages}
+                onClick={() => loadOrders(orders.page + 1)}
+                className="btn-secondary !px-4 !py-2 disabled:opacity-40"
+              >
+                Вперёд →
+              </button>
+            </div>
+          )}
 
           {selectedOrder && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={() => setSelectedOrder(null)}>
@@ -787,7 +912,10 @@ export default function Admin() {
                     <td className="p-4">{u.first_name} {u.last_name}</td>
                     <td className="p-4">{u.email || '—'}</td>
                     <td className="p-4">{u.is_admin ? '✅' : '—'}</td>
-                    <td className="p-4">
+                    <td className="p-4 space-x-3">
+                      <button onClick={() => openUserDetail(u.id)} className="text-accent hover:underline text-sm">
+                        Детали
+                      </button>
                       <button onClick={() => handleToggleAdmin(u.id)} className="text-accent hover:underline text-sm">
                         {u.is_admin ? 'Снять админа' : 'Сделать админом'}
                       </button>
@@ -797,6 +925,72 @@ export default function Admin() {
               </tbody>
             </table>
           </div>
+
+          {(selectedUser || userDetailLoading) && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={() => !userDetailLoading && setSelectedUser(null)}>
+              <div className="card p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto animate-slide-up" onClick={(e) => e.stopPropagation()}>
+                {userDetailLoading ? (
+                  <div className="py-12 flex justify-center"><Spinner /></div>
+                ) : selectedUser && (
+                  <>
+                    <h3 className="font-semibold text-lg mb-1">
+                      {selectedUser.last_name} {selectedUser.first_name} {selectedUser.patronymic || ''}
+                    </h3>
+                    <p className="text-sm text-stone mb-1">📞 {selectedUser.phone}</p>
+                    {selectedUser.email && <p className="text-sm text-stone mb-1">✉️ {selectedUser.email}</p>}
+                    <p className="text-sm text-stone/70 mb-4">
+                      Регистрация: {new Date(selectedUser.created_at).toLocaleDateString('ru-RU')}
+                      {selectedUser.is_admin && ' · Администратор'}
+                    </p>
+                    <div className="flex gap-4 mb-4 text-sm">
+                      <span className="rounded-full bg-sand/50 px-3 py-1">Заказов: {selectedUser.orders_count}</span>
+                      <span className="rounded-full bg-accent/20 px-3 py-1">
+                        На сумму: {selectedUser.orders_total.toLocaleString('ru-RU')} ₽
+                      </span>
+                    </div>
+
+                    <h4 className="font-medium mb-3">История заказов</h4>
+                    {selectedUser.orders.length === 0 ? (
+                      <p className="text-sm text-stone/70">Заказов пока нет</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {selectedUser.orders.map((o) => (
+                          <div key={o.id} className="rounded-soft border border-sand/60 bg-cream/50 p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                              <span className="font-medium">Заказ №{o.id}</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                o.status === 'delivered' ? 'bg-accent/30' :
+                                o.status === 'cancelled' ? 'bg-red-100 text-red-600' :
+                                'bg-sand/70'
+                              }`}>
+                                {STATUS_LABELS[o.status] || o.status}
+                              </span>
+                            </div>
+                            <p className="text-sm text-stone mb-1">📍 {o.address}</p>
+                            <p className="text-sm text-stone mb-2">
+                              📅 Доставка: {formatDate(o.delivery_date)} · Создан: {new Date(o.created_at).toLocaleString('ru-RU')}
+                            </p>
+                            <div className="space-y-1 border-t border-sand/40 pt-2">
+                              {o.items.map((i) => (
+                                <div key={i.id} className="flex justify-between text-sm">
+                                  <span>{i.product_name} × {i.quantity}</span>
+                                  <span>{(i.price * i.quantity).toLocaleString('ru-RU')} ₽</span>
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-right font-semibold text-accent mt-2">
+                              {o.total.toLocaleString('ru-RU')} ₽
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={() => setSelectedUser(null)} className="btn-secondary mt-6 w-full !py-2">Закрыть</button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

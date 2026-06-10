@@ -371,6 +371,13 @@ class AdminUserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AdminUserDetailResponse(AdminUserResponse):
+    patronymic: Optional[str] = None
+    orders: list[AdminOrderResponse] = []
+    orders_count: int = 0
+    orders_total: float = 0
+
+
 class SalesDayData(BaseModel):
     date: str
     total: float

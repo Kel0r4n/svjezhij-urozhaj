@@ -150,6 +150,7 @@ export const api = {
   getAdminOrder: (id) => request(`/admin/orders/${id}`),
   updateOrderStatus: (id, status) => request(`/admin/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   getUsers: (search) => request(`/admin/users${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  getAdminUser: (id) => request(`/admin/users/${id}`),
   toggleAdmin: (id) => request(`/admin/users/${id}/admin`, { method: 'PATCH' }),
   bulkUpdateStock: (items) => request('/admin/stock/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
 

@@ -1,4 +1,5 @@
 import math
+from datetime import date, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
@@ -7,7 +8,7 @@ from ..database import get_db
 from ..models import Order, OrderItem, OrderStatus, Product, User, DeliveryAddress, DeliveryDate, ProductCategory
 from ..schemas import (
     DashboardStats, AdminOrderResponse, AdminOrderListResponse, OrderStatusUpdate,
-    AdminUserResponse, StockBulkUpdateRequest, ProductResponse, SalesAnalyticsResponse,
+    AdminUserResponse, AdminUserDetailResponse, StockBulkUpdateRequest, ProductResponse, SalesAnalyticsResponse,
     DeliveryAddressCreate, DeliveryAddressResponse, DeliveryDateCreate, DeliveryDateResponse,
     DayDetailResponse, CategoryCreate, CategoryUpdate, CategoryResponse,
 )
@@ -15,6 +16,12 @@ from ..auth import get_current_admin
 from ..utils import get_dashboard_stats, get_sales_analytics, get_day_detail
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _current_week_bounds() -> tuple[date, date]:
+    today = date.today()
+    start = today - timedelta(days=today.weekday())
+    return start, start + timedelta(days=6)
 
 
 def _admin_order_response(order: Order) -> AdminOrderResponse:
@@ -178,15 +185,31 @@ def admin_list_orders(
     per_page: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    address: Optional[str] = Query(None, description="Точный адрес доставки"),
+    delivery_from: Optional[date] = Query(None),
+    delivery_to: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(get_current_admin),
 ):
+    if delivery_from is None and delivery_to is None:
+        delivery_from, delivery_to = _current_week_bounds()
+    elif delivery_from is None:
+        delivery_from = delivery_to
+    elif delivery_to is None:
+        delivery_to = delivery_from
+
     query = db.query(Order).join(User)
+    query = query.filter(
+        Order.delivery_date >= delivery_from,
+        Order.delivery_date <= delivery_to,
+    )
     if status:
         try:
             query = query.filter(Order.status == OrderStatus(status))
         except ValueError:
             pass
+    if address:
+        query = query.filter(Order.address == address)
     if search:
         from sqlalchemy import or_
         like = f"%{search}%"
@@ -279,6 +302,39 @@ def list_users(
         from sqlalchemy import or_
         query = query.filter(or_(User.email.ilike(f"%{search}%"), User.phone.ilike(f"%{search}%")))
     return query.order_by(User.created_at.desc()).all()
+
+
+@router.get("/users/{user_id}", response_model=AdminUserDetailResponse)
+def get_user_detail(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    orders = (
+        db.query(Order)
+        .options(joinedload(Order.items), joinedload(Order.user))
+        .filter(Order.user_id == user_id)
+        .order_by(Order.created_at.desc())
+        .all()
+    )
+    order_responses = [_admin_order_response(o) for o in orders]
+    return AdminUserDetailResponse(
+        id=user.id,
+        email=user.email,
+        phone=user.phone,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        patronymic=user.patronymic,
+        is_admin=user.is_admin,
+        created_at=user.created_at,
+        orders=order_responses,
+        orders_count=len(order_responses),
+        orders_total=sum(o.total for o in orders),
+    )
 
 
 @router.patch("/users/{user_id}/admin", response_model=AdminUserResponse)
