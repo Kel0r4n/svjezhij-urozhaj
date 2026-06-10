@@ -133,6 +133,57 @@ class DeliveryAddressResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DeliveryAddressPublicResponse(DeliveryAddressResponse):
+    next_delivery_date: Optional[date] = None
+    next_delivery_time: Optional[str] = None
+    next_delivery_weekday: Optional[str] = None
+    delivery_notice: Optional[str] = None
+
+
+class DeliveryScheduleSlotCreate(BaseModel):
+    delivery_address_id: int
+    weekday: int = Field(ge=0, le=6)
+    delivery_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+
+class DeliveryScheduleSlotResponse(BaseModel):
+    id: int
+    delivery_address_id: int
+    weekday: int
+    delivery_time: str
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class DeliveryExceptionCreate(BaseModel):
+    exception_date: date
+    action: str = Field(pattern=r"^(postponed|cancelled)$")
+    new_date: Optional[date] = None
+    message: str = Field(default="", max_length=2000)
+    address_ids: list[int] = Field(min_length=1)
+
+
+class DeliveryExceptionResponse(BaseModel):
+    id: int
+    exception_date: date
+    action: str
+    new_date: Optional[date]
+    message: str
+    is_active: bool
+    address_ids: list[int] = []
+
+    model_config = {"from_attributes": True}
+
+
+class DeliveryNextResponse(BaseModel):
+    delivery_date: date
+    delivery_time: Optional[str]
+    weekday_label: str
+    notice: Optional[str]
+    delivery_date_id: int
+
+
 class DeliveryDateCreate(BaseModel):
     delivery_date: date
 
@@ -292,7 +343,7 @@ class CartSyncRequest(BaseModel):
 # --- Order ---
 class OrderCreate(BaseModel):
     delivery_address_id: int
-    delivery_date_id: int
+    delivery_date_id: Optional[int] = None
 
 
 class OrderItemResponse(BaseModel):
@@ -371,11 +422,43 @@ class AdminUserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserEventCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=5000)
+    price: Optional[float] = Field(default=None, ge=0)
+
+
+class UserEventResponse(BaseModel):
+    id: int
+    user_id: int
+    title: str
+    description: str
+    price: Optional[float]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class AdminUserDetailResponse(AdminUserResponse):
     patronymic: Optional[str] = None
     orders: list[AdminOrderResponse] = []
     orders_count: int = 0
     orders_total: float = 0
+    events: list[UserEventResponse] = []
+
+
+class DeliveryManifestRow(BaseModel):
+    contact: str
+    product: str
+    price: float
+    quantity: int
+    address: str
+
+
+class DeliveryManifestResponse(BaseModel):
+    date: date
+    rows: list[DeliveryManifestRow]
+    total_rows: int
 
 
 class SalesDayData(BaseModel):

@@ -8,7 +8,9 @@ import ColorField from '../components/ColorField';
 import ProductCircleImage from '../components/ProductCircleImage';
 import ProductImageEditor from '../components/ProductImageEditor';
 import DateRangePicker from '../components/DateRangePicker';
-import { getCurrentWeekRange, shiftWeek, formatRangeLabel } from '../utils/dates';
+import SegmentedControl from '../components/SegmentedControl';
+import useDebounce from '../hooks/useDebounce';
+import { getCurrentWeekRange, shiftWeek, formatRangeLabel, parseISODate, toISODate } from '../utils/dates';
 import toast from 'react-hot-toast';
 
 const TABS = [
@@ -16,11 +18,20 @@ const TABS = [
   { id: 'products', label: 'Товары' },
   { id: 'categories', label: 'Категории' },
   { id: 'addresses', label: 'Адреса' },
+  { id: 'schedule', label: 'График' },
   { id: 'dates', label: 'Даты доставки' },
   { id: 'orders', label: 'Заказы' },
   { id: 'users', label: 'Пользователи' },
   { id: 'stock', label: 'Склад' },
 ];
+
+const WEEKDAYS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+
+function shiftDay(iso, delta) {
+  const d = parseISODate(iso);
+  d.setDate(d.getDate() + delta);
+  return toISODate(d);
+}
 
 const STATUS_OPTIONS = ['created', 'confirmed', 'delivered', 'cancelled'];
 const STATUS_LABELS = { created: 'Создан', confirmed: 'Подтверждён', delivered: 'Доставлен', cancelled: 'Отменён' };
@@ -74,11 +85,24 @@ export default function Admin() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const calendarBtnRef = useRef(null);
+  const manifestPrintRef = useRef(null);
+  const [ordersViewMode, setOrdersViewMode] = useState('orders');
+  const [manifest, setManifest] = useState({ rows: [], total_rows: 0 });
+  const debouncedOrderSearch = useDebounce(orderFilter.search, 300);
 
   const [users, setUsers] = useState([]);
   const [userSearch, setUserSearch] = useState('');
+  const debouncedUserSearch = useDebounce(userSearch, 300);
   const [selectedUser, setSelectedUser] = useState(null);
   const [userDetailLoading, setUserDetailLoading] = useState(false);
+  const [eventForm, setEventForm] = useState({ title: '', description: '', price: '' });
+
+  const [scheduleSlots, setScheduleSlots] = useState([]);
+  const [exceptions, setExceptions] = useState([]);
+  const [slotForm, setSlotForm] = useState({ delivery_address_id: '', weekday: '2', delivery_time: '19:00' });
+  const [excForm, setExcForm] = useState({
+    exception_date: '', action: 'postponed', new_date: '', message: '', address_ids: [],
+  });
 
   const [stockItems, setStockItems] = useState([]);
 
@@ -134,10 +158,32 @@ export default function Admin() {
       delivery_to: orderFilter.delivery_to,
     };
     if (orderFilter.status) params.status = orderFilter.status;
-    if (orderFilter.search) params.search = orderFilter.search;
+    if (debouncedOrderSearch) params.search = debouncedOrderSearch;
     if (orderFilter.address) params.address = orderFilter.address;
     api.getAdminOrders(params)
       .then(setOrders)
+      .catch((e) => toast.error(e.message))
+      .finally(() => setLoading(false));
+  };
+
+  const loadManifest = () => {
+    setLoading(true);
+    const params = { day: orderFilter.delivery_from };
+    if (orderFilter.address) params.address = orderFilter.address;
+    api.getDeliveryManifest(params)
+      .then(setManifest)
+      .catch((e) => toast.error(e.message))
+      .finally(() => setLoading(false));
+  };
+
+  const loadSchedule = () => {
+    setLoading(true);
+    Promise.all([api.getSchedule(), api.getExceptions(), api.getAdminAddresses()])
+      .then(([slots, excs, addrs]) => {
+        setScheduleSlots(slots);
+        setExceptions(excs);
+        setAddresses(addrs);
+      })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
   };
@@ -158,10 +204,39 @@ export default function Admin() {
 
   const loadUsers = () => {
     setLoading(true);
-    api.getUsers(userSearch || undefined)
+    api.getUsers(debouncedUserSearch || undefined)
       .then(setUsers)
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
+  };
+
+  const saveUserEvent = async (e) => {
+    e.preventDefault();
+    if (!selectedUser) return;
+    try {
+      await api.createUserEvent(selectedUser.id, {
+        title: eventForm.title,
+        description: eventForm.description,
+        price: eventForm.price ? parseFloat(eventForm.price) : null,
+      });
+      setEventForm({ title: '', description: '', price: '' });
+      openUserDetail(selectedUser.id);
+      toast.success('Событие добавлено');
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handlePrintManifest = () => {
+    const el = manifestPrintRef.current;
+    if (!el) return;
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>Доставки ${orderFilter.delivery_from}</title>
+      <style>body{font-family:Arial,sans-serif;font-size:12px}table{border-collapse:collapse;width:100%}
+      th,td{border:1px solid #333;padding:6px 8px;text-align:left}th{background:#E6E0D4}</style></head><body>
+      <h2>Доставки на ${formatDate(orderFilter.delivery_from)}</h2>${el.outerHTML}</body></html>`);
+    w.document.close();
+    w.print();
   };
 
   const loadAdminCategories = () => {
@@ -197,8 +272,8 @@ export default function Admin() {
     if (tab === 'dashboard') loadAdminCategories();
     if (tab === 'addresses') loadAddresses();
     if (tab === 'dates') loadDeliveryDates();
+    if (tab === 'schedule') loadSchedule();
     if (tab === 'orders') loadAddresses();
-    if (tab === 'users') loadUsers();
     if (tab === 'stock') loadStock();
   }, [tab]);
 
@@ -207,8 +282,17 @@ export default function Admin() {
   }, [tab, loadSalesAnalytics]);
 
   useEffect(() => {
-    if (tab === 'orders') loadOrders();
-  }, [tab, orderFilter.delivery_from, orderFilter.delivery_to]);
+    if (tab !== 'orders') return;
+    if (ordersViewMode === 'orders') loadOrders();
+    else loadManifest();
+  }, [
+    tab, ordersViewMode, orderFilter.delivery_from, orderFilter.delivery_to,
+    orderFilter.address, orderFilter.status, debouncedOrderSearch,
+  ]);
+
+  useEffect(() => {
+    if (tab === 'users') loadUsers();
+  }, [tab, debouncedUserSearch]);
 
   useEffect(() => {
     if (selectedDay) loadDayDetail(selectedDay);
@@ -725,54 +809,72 @@ export default function Admin() {
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={() => shiftOrderWeek(-1)}
+              onClick={() => {
+                if (ordersViewMode === 'deliveries') {
+                  const d = shiftDay(orderFilter.delivery_from, -1);
+                  setOrderFilter((f) => ({ ...f, delivery_from: d, delivery_to: d }));
+                } else shiftOrderWeek(-1);
+              }}
               className="flex h-10 w-10 items-center justify-center rounded-full bg-sand/70 text-stone transition hover:bg-warm"
-              title="Предыдущая неделя"
+              title={ordersViewMode === 'deliveries' ? 'Предыдущий день' : 'Предыдущая неделя'}
             >
               ‹
             </button>
             <span className="min-w-[10rem] text-center text-sm font-medium text-stone">
-              {formatRangeLabel(orderFilter.delivery_from, orderFilter.delivery_to)}
+              {ordersViewMode === 'deliveries'
+                ? formatDate(orderFilter.delivery_from)
+                : formatRangeLabel(orderFilter.delivery_from, orderFilter.delivery_to)}
             </span>
             <button
               type="button"
-              onClick={() => shiftOrderWeek(1)}
+              onClick={() => {
+                if (ordersViewMode === 'deliveries') {
+                  const d = shiftDay(orderFilter.delivery_from, 1);
+                  setOrderFilter((f) => ({ ...f, delivery_from: d, delivery_to: d }));
+                } else shiftOrderWeek(1);
+              }}
               className="flex h-10 w-10 items-center justify-center rounded-full bg-sand/70 text-stone transition hover:bg-warm"
-              title="Следующая неделя"
+              title={ordersViewMode === 'deliveries' ? 'Следующий день' : 'Следующая неделя'}
             >
               ›
             </button>
-            <button
-              ref={calendarBtnRef}
-              type="button"
-              onClick={() => setCalendarOpen((v) => !v)}
-              className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
-                calendarOpen
-                  ? 'border-accent bg-accent/20 text-accent'
-                  : 'border-sand bg-[#FDF8F3] text-stone hover:border-accent/50 hover:bg-accent/10'
-              }`}
-              title="Выбрать период"
-              aria-label="Календарь"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-              </svg>
-            </button>
-            <DateRangePicker
-              open={calendarOpen}
-              onClose={() => setCalendarOpen(false)}
-              anchorRef={calendarBtnRef}
-              value={{ from: orderFilter.delivery_from, to: orderFilter.delivery_to }}
-              onChange={({ from, to }) => {
-                setOrderFilter((f) => ({ ...f, delivery_from: from, delivery_to: to }));
-              }}
-            />
+            {ordersViewMode === 'orders' && (
+              <>
+                <button
+                  ref={calendarBtnRef}
+                  type="button"
+                  onClick={() => setCalendarOpen((v) => !v)}
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                    calendarOpen
+                      ? 'border-accent bg-accent/20 text-accent'
+                      : 'border-sand bg-[#FDF8F3] text-stone hover:border-accent/50 hover:bg-accent/10'
+                  }`}
+                  title="Выбрать период"
+                  aria-label="Календарь"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                  </svg>
+                </button>
+                <DateRangePicker
+                  open={calendarOpen}
+                  onClose={() => setCalendarOpen(false)}
+                  anchorRef={calendarBtnRef}
+                  value={{ from: orderFilter.delivery_from, to: orderFilter.delivery_to }}
+                  onChange={({ from, to }) => {
+                    setOrderFilter((f) => ({ ...f, delivery_from: from, delivery_to: to }));
+                  }}
+                />
+              </>
+            )}
             <span className="text-xs text-stone/70">
-              {orders.total} заказ(ов) за период
+              {ordersViewMode === 'deliveries'
+                ? `${manifest.total_rows} позиций`
+                : `${orders.total} заказ(ов) за период`}
             </span>
           </div>
 
-          <div className="flex flex-wrap gap-3 mb-6">
+          <div className="flex flex-wrap items-center gap-3 mb-6">
             <select
               value={orderFilter.address}
               onChange={(e) => setOrderFilter({ ...orderFilter, address: e.target.value })}
@@ -783,85 +885,133 @@ export default function Admin() {
                 <option key={a.id} value={a.address}>{a.address}</option>
               ))}
             </select>
-            <select value={orderFilter.status} onChange={(e) => setOrderFilter({ ...orderFilter, status: e.target.value })} className="input-field max-w-xs">
-              <option value="">Все статусы</option>
-              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-            </select>
-            <input
-              placeholder="Поиск по имени или телефону..."
-              value={orderFilter.search}
-              onChange={(e) => setOrderFilter({ ...orderFilter, search: e.target.value })}
-              onKeyDown={(e) => e.key === 'Enter' && loadOrders()}
-              className="input-field max-w-xs"
+            {ordersViewMode === 'orders' && (
+              <>
+                <select value={orderFilter.status} onChange={(e) => setOrderFilter({ ...orderFilter, status: e.target.value })} className="input-field max-w-xs">
+                  <option value="">Все статусы</option>
+                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                </select>
+                <input
+                  placeholder="Поиск по имени или телефону..."
+                  value={orderFilter.search}
+                  onChange={(e) => setOrderFilter({ ...orderFilter, search: e.target.value })}
+                  className="input-field max-w-xs"
+                />
+              </>
+            )}
+            <SegmentedControl
+              options={[
+                { value: 'orders', label: 'Заказы' },
+                { value: 'deliveries', label: 'Доставки' },
+              ]}
+              value={ordersViewMode}
+              onChange={(mode) => {
+                if (mode === 'deliveries') {
+                  const day = orderFilter.delivery_from;
+                  setOrderFilter((f) => ({ ...f, delivery_from: day, delivery_to: day }));
+                }
+                setOrdersViewMode(mode);
+              }}
             />
-            <button onClick={() => loadOrders()} className="btn-secondary !px-4 !py-2">Найти</button>
+            {ordersViewMode === 'deliveries' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => api.exportDeliveryManifest(orderFilter.delivery_from, orderFilter.address || undefined).catch((e) => toast.error(e.message))}
+                  className="btn-secondary !px-4 !py-2 text-sm"
+                >
+                  Excel
+                </button>
+                <button type="button" onClick={handlePrintManifest} className="btn-secondary !px-4 !py-2 text-sm">
+                  PDF / Печать
+                </button>
+              </>
+            )}
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full card">
-              <thead>
-                <tr className="border-b border-sand text-sm">
-                  <th className="p-4 text-center">№</th>
-                  <th className="p-4 text-center">Клиент</th>
-                  <th className="p-4 text-center">Телефон</th>
-                  <th className="p-4 text-center">Адрес</th>
-                  <th className="p-4 text-center">Доставка</th>
-                  <th className="p-4 text-center">Сумма</th>
-                  <th className="p-4 text-center">Статус</th>
-                  <th className="p-4 text-center">Создан</th>
-                  <th className="p-4 text-center">Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.items.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="p-8 text-center text-stone/70">
-                      Нет заказов за выбранный период
-                    </td>
-                  </tr>
-                )}
-                {orders.items.map((o) => (
-                  <tr key={o.id} className="border-b border-sand/50 hover:bg-sand/20">
-                    <td className="p-4 text-center">{o.id}</td>
-                    <td className="p-4 text-center">{o.user_name || '—'}</td>
-                    <td className="p-4 text-center whitespace-nowrap">{o.user_phone || '—'}</td>
-                    <td className="p-4 text-center text-sm max-w-[180px] truncate" title={o.address}>{o.address}</td>
-                    <td className="p-4 text-sm text-center whitespace-nowrap">{formatDate(o.delivery_date)}</td>
-                    <td className="p-4 text-center">{o.total.toLocaleString('ru-RU')} ₽</td>
-                    <td className="p-4 text-center">
-                      <select value={o.status} onChange={(e) => handleStatusChange(o.id, e.target.value)} className="input-field !py-1 !px-2 text-sm" disabled={o.status === 'cancelled'}>
-                        {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-                      </select>
-                    </td>
-                    <td className="p-4 text-sm text-center">{new Date(o.created_at).toLocaleString('ru-RU')}</td>
-                    <td className="p-4 text-center">
-                      <button onClick={() => setSelectedOrder(o)} className="text-accent hover:underline text-sm">Детали</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {ordersViewMode === 'orders' ? (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full card">
+                  <thead>
+                    <tr className="border-b border-sand text-sm">
+                      <th className="p-4 text-center">№</th>
+                      <th className="p-4 text-center">Клиент</th>
+                      <th className="p-4 text-center">Телефон</th>
+                      <th className="p-4 text-center">Адрес</th>
+                      <th className="p-4 text-center">Доставка</th>
+                      <th className="p-4 text-center">Сумма</th>
+                      <th className="p-4 text-center">Статус</th>
+                      <th className="p-4 text-center">Создан</th>
+                      <th className="p-4 text-center">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.items.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="p-8 text-center text-stone/70">
+                          Нет заказов за выбранный период
+                        </td>
+                      </tr>
+                    )}
+                    {orders.items.map((o) => (
+                      <tr key={o.id} className="border-b border-sand/50 hover:bg-sand/20">
+                        <td className="p-4 text-center">{o.id}</td>
+                        <td className="p-4 text-center">{o.user_name || '—'}</td>
+                        <td className="p-4 text-center whitespace-nowrap">{o.user_phone || '—'}</td>
+                        <td className="p-4 text-center text-sm max-w-[180px] truncate" title={o.address}>{o.address}</td>
+                        <td className="p-4 text-sm text-center whitespace-nowrap">{formatDate(o.delivery_date)}</td>
+                        <td className="p-4 text-center">{o.total.toLocaleString('ru-RU')} ₽</td>
+                        <td className="p-4 text-center">
+                          <select value={o.status} onChange={(e) => handleStatusChange(o.id, e.target.value)} className="input-field !py-1 !px-2 text-sm" disabled={o.status === 'cancelled'}>
+                            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                          </select>
+                        </td>
+                        <td className="p-4 text-sm text-center">{new Date(o.created_at).toLocaleString('ru-RU')}</td>
+                        <td className="p-4 text-center">
+                          <button onClick={() => setSelectedOrder(o)} className="text-accent hover:underline text-sm">Детали</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-          {orders.pages > 1 && (
-            <div className="mt-4 flex items-center justify-center gap-3">
-              <button
-                type="button"
-                disabled={orders.page <= 1}
-                onClick={() => loadOrders(orders.page - 1)}
-                className="btn-secondary !px-4 !py-2 disabled:opacity-40"
-              >
-                ← Назад
-              </button>
-              <span className="text-sm text-stone">{orders.page} / {orders.pages}</span>
-              <button
-                type="button"
-                disabled={orders.page >= orders.pages}
-                onClick={() => loadOrders(orders.page + 1)}
-                className="btn-secondary !px-4 !py-2 disabled:opacity-40"
-              >
-                Вперёд →
-              </button>
+              {orders.pages > 1 && (
+                <div className="mt-4 flex items-center justify-center gap-3">
+                  <button type="button" disabled={orders.page <= 1} onClick={() => loadOrders(orders.page - 1)} className="btn-secondary !px-4 !py-2 disabled:opacity-40">← Назад</button>
+                  <span className="text-sm text-stone">{orders.page} / {orders.pages}</span>
+                  <button type="button" disabled={orders.page >= orders.pages} onClick={() => loadOrders(orders.page + 1)} className="btn-secondary !px-4 !py-2 disabled:opacity-40">Вперёд →</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="overflow-x-auto" ref={manifestPrintRef}>
+              <table className="w-full card text-sm">
+                <thead>
+                  <tr className="border-b border-sand">
+                    <th className="p-3 text-left">Контакт</th>
+                    <th className="p-3 text-left">Товар</th>
+                    <th className="p-3 text-center">Цена</th>
+                    <th className="p-3 text-center">Количество</th>
+                    <th className="p-3 text-left">ЖК</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {manifest.rows.length === 0 && (
+                    <tr><td colSpan={5} className="p-8 text-center text-stone/70">Нет доставок на этот день</td></tr>
+                  )}
+                  {manifest.rows.map((row, i) => (
+                    <tr key={i} className="border-b border-sand/50">
+                      <td className="p-3">{row.contact}</td>
+                      <td className="p-3">{row.product}</td>
+                      <td className="p-3 text-center">{row.price.toLocaleString('ru-RU')}</td>
+                      <td className="p-3 text-center">{row.quantity}</td>
+                      <td className="p-3">{row.address}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
@@ -888,11 +1038,135 @@ export default function Admin() {
         </div>
       )}
 
+      {tab === 'schedule' && !loading && (
+        <div className="animate-fade-in max-w-4xl mx-auto space-y-8">
+          <section>
+            <h3 className="font-semibold mb-3">График по адресам</h3>
+            <p className="text-sm text-stone/70 mb-4">
+              Укажите день недели и время для каждого ЖК. Клиент увидит ближайшую доставку при оформлении заказа.
+            </p>
+            <form
+              className="card p-4 flex flex-wrap gap-3 mb-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  await api.createScheduleSlot({
+                    delivery_address_id: Number(slotForm.delivery_address_id),
+                    weekday: Number(slotForm.weekday),
+                    delivery_time: slotForm.delivery_time,
+                  });
+                  setSlotForm({ ...slotForm, delivery_time: '19:00' });
+                  loadSchedule();
+                  toast.success('Слот добавлен');
+                } catch (err) {
+                  toast.error(err.message);
+                }
+              }}
+            >
+              <select required value={slotForm.delivery_address_id} onChange={(e) => setSlotForm({ ...slotForm, delivery_address_id: e.target.value })} className="input-field flex-1 min-w-[180px]">
+                <option value="">Адрес</option>
+                {addresses.map((a) => <option key={a.id} value={a.id}>{a.address}</option>)}
+              </select>
+              <select value={slotForm.weekday} onChange={(e) => setSlotForm({ ...slotForm, weekday: e.target.value })} className="input-field w-40">
+                {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+              </select>
+              <input type="time" required value={slotForm.delivery_time} onChange={(e) => setSlotForm({ ...slotForm, delivery_time: e.target.value })} className="input-field w-32" />
+              <button type="submit" className="btn-primary !px-4 !py-2">Добавить</button>
+            </form>
+            <div className="space-y-2">
+              {scheduleSlots.map((s) => {
+                const addr = addresses.find((a) => a.id === s.delivery_address_id);
+                return (
+                  <div key={s.id} className="card p-3 flex items-center justify-between gap-3">
+                    <span>{addr?.address || '—'} · {WEEKDAYS[s.weekday]} · {s.delivery_time}</span>
+                    <button type="button" onClick={() => api.deleteScheduleSlot(s.id).then(loadSchedule).catch((e) => toast.error(e.message))} className="text-sm text-red-400 hover:underline">Удалить</button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="font-semibold mb-3">Исключения (перенос / отмена)</h3>
+            <p className="text-sm text-stone/70 mb-4">
+              Например: «Доставка в ЖК Среда переносится на следующую неделю» — выберите дату, адреса и новую дату.
+            </p>
+            <form
+              className="card p-4 space-y-3 mb-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  await api.createException({
+                    exception_date: excForm.exception_date,
+                    action: excForm.action,
+                    new_date: excForm.action === 'postponed' ? excForm.new_date : null,
+                    message: excForm.message,
+                    address_ids: excForm.address_ids,
+                  });
+                  setExcForm({ exception_date: '', action: 'postponed', new_date: '', message: '', address_ids: [] });
+                  loadSchedule();
+                  toast.success('Исключение создано');
+                } catch (err) {
+                  toast.error(err.message);
+                }
+              }}
+            >
+              <div className="flex flex-wrap gap-3">
+                <input type="date" required value={excForm.exception_date} onChange={(e) => setExcForm({ ...excForm, exception_date: e.target.value })} className="input-field w-44" />
+                <select value={excForm.action} onChange={(e) => setExcForm({ ...excForm, action: e.target.value })} className="input-field w-40">
+                  <option value="postponed">Перенос</option>
+                  <option value="cancelled">Отмена</option>
+                </select>
+                {excForm.action === 'postponed' && (
+                  <input type="date" required value={excForm.new_date} onChange={(e) => setExcForm({ ...excForm, new_date: e.target.value })} className="input-field w-44" placeholder="Новая дата" />
+                )}
+              </div>
+              <textarea value={excForm.message} onChange={(e) => setExcForm({ ...excForm, message: e.target.value })} placeholder="Сообщение для клиентов..." className="input-field min-h-[72px]" />
+              <div className="flex flex-wrap gap-2">
+                {addresses.map((a) => (
+                  <label key={a.id} className="flex items-center gap-1 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={excForm.address_ids.includes(a.id)}
+                      onChange={(e) => {
+                        setExcForm((f) => ({
+                          ...f,
+                          address_ids: e.target.checked
+                            ? [...f.address_ids, a.id]
+                            : f.address_ids.filter((x) => x !== a.id),
+                        }));
+                      }}
+                    />
+                    {a.address}
+                  </label>
+                ))}
+              </div>
+              <button type="submit" className="btn-primary !px-4 !py-2" disabled={!excForm.address_ids.length}>Сохранить исключение</button>
+            </form>
+            <div className="space-y-2">
+              {exceptions.map((ex) => (
+                <div key={ex.id} className={`card p-4 ${!ex.is_active ? 'opacity-50' : ''}`}>
+                  <div className="flex justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{formatDate(ex.exception_date)} → {ex.action === 'postponed' && ex.new_date ? formatDate(ex.new_date) : 'отмена'}</p>
+                      {ex.message && <p className="text-sm text-stone mt-1">{ex.message}</p>}
+                      <p className="text-xs text-stone/60 mt-1">Адресов: {ex.address_ids.length}</p>
+                    </div>
+                    <button type="button" onClick={() => api.toggleException(ex.id).then(loadSchedule).catch((e) => toast.error(e.message))} className="text-sm text-accent hover:underline shrink-0">
+                      {ex.is_active ? 'Отключить' : 'Включить'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
       {tab === 'users' && !loading && (
         <div className="animate-fade-in">
           <div className="flex gap-3 mb-6">
-            <input placeholder="Поиск по телефону или email..." value={userSearch} onChange={(e) => setUserSearch(e.target.value)} className="input-field max-w-xs" />
-            <button onClick={loadUsers} className="btn-secondary !px-4 !py-2">Найти</button>
+            <input placeholder="Поиск по имени, телефону или email..." value={userSearch} onChange={(e) => setUserSearch(e.target.value)} className="input-field max-w-sm" />
           </div>
           <div className="overflow-x-auto">
             <table className="w-full card">
@@ -949,42 +1223,83 @@ export default function Admin() {
                       </span>
                     </div>
 
-                    <h4 className="font-medium mb-3">История заказов</h4>
-                    {selectedUser.orders.length === 0 ? (
-                      <p className="text-sm text-stone/70">Заказов пока нет</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {selectedUser.orders.map((o) => (
-                          <div key={o.id} className="rounded-soft border border-sand/60 bg-cream/50 p-4">
-                            <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-                              <span className="font-medium">Заказ №{o.id}</span>
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                o.status === 'delivered' ? 'bg-accent/30' :
-                                o.status === 'cancelled' ? 'bg-red-100 text-red-600' :
-                                'bg-sand/70'
-                              }`}>
-                                {STATUS_LABELS[o.status] || o.status}
-                              </span>
+                    <form onSubmit={saveUserEvent} className="rounded-soft border border-sand/60 bg-white p-4 mb-6 space-y-3">
+                      <h4 className="font-medium">Добавить событие / комментарий</h4>
+                      <input required value={eventForm.title} onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })} placeholder="Название (например: Заказ)" className="input-field" />
+                      <textarea value={eventForm.description} onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })} placeholder="Описание" className="input-field min-h-[64px]" />
+                      <input type="number" min="0" step="0.01" value={eventForm.price} onChange={(e) => setEventForm({ ...eventForm, price: e.target.value })} placeholder="Цена (необязательно)" className="input-field max-w-xs" />
+                      <button type="submit" className="btn-primary !py-2 !px-4 text-sm">Добавить</button>
+                    </form>
+
+                    <h4 className="font-medium mb-3">История</h4>
+                    {(() => {
+                      const timeline = [
+                        ...selectedUser.orders.map((o) => ({
+                          key: `order-${o.id}`,
+                          type: 'order',
+                          date: o.created_at,
+                          data: o,
+                        })),
+                        ...(selectedUser.events || []).map((ev) => ({
+                          key: `event-${ev.id}`,
+                          type: 'event',
+                          date: ev.created_at,
+                          data: ev,
+                        })),
+                      ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                      if (!timeline.length) return <p className="text-sm text-stone/70">Записей пока нет</p>;
+
+                      return (
+                        <div className="space-y-3">
+                          {timeline.map((item) => item.type === 'order' ? (
+                            <div key={item.key} className="rounded-soft border border-sand/60 bg-cream/50 p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                                <span className="font-medium">Заказ №{item.data.id}</span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  item.data.status === 'delivered' ? 'bg-accent/30' :
+                                  item.data.status === 'cancelled' ? 'bg-red-100 text-red-600' :
+                                  'bg-sand/70'
+                                }`}>
+                                  {STATUS_LABELS[item.data.status] || item.data.status}
+                                </span>
+                              </div>
+                              <p className="text-sm text-stone mb-1">📍 {item.data.address}</p>
+                              <p className="text-sm text-stone mb-2">
+                                📅 Доставка: {formatDate(item.data.delivery_date)} · {new Date(item.data.created_at).toLocaleString('ru-RU')}
+                              </p>
+                              <div className="space-y-1 border-t border-sand/40 pt-2">
+                                {item.data.items.map((i) => (
+                                  <div key={i.id} className="flex justify-between text-sm">
+                                    <span>{i.product_name} × {i.quantity}</span>
+                                    <span>{(i.price * i.quantity).toLocaleString('ru-RU')} ₽</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <p className="text-right font-semibold text-accent mt-2">{item.data.total.toLocaleString('ru-RU')} ₽</p>
                             </div>
-                            <p className="text-sm text-stone mb-1">📍 {o.address}</p>
-                            <p className="text-sm text-stone mb-2">
-                              📅 Доставка: {formatDate(o.delivery_date)} · Создан: {new Date(o.created_at).toLocaleString('ru-RU')}
-                            </p>
-                            <div className="space-y-1 border-t border-sand/40 pt-2">
-                              {o.items.map((i) => (
-                                <div key={i.id} className="flex justify-between text-sm">
-                                  <span>{i.product_name} × {i.quantity}</span>
-                                  <span>{(i.price * i.quantity).toLocaleString('ru-RU')} ₽</span>
-                                </div>
-                              ))}
+                          ) : (
+                            <div key={item.key} className="rounded-soft border border-accent/30 bg-accent/5 p-4">
+                              <div className="flex justify-between gap-2 mb-1">
+                                <span className="font-medium">{item.data.title}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => api.deleteUserEvent(selectedUser.id, item.data.id).then(() => openUserDetail(selectedUser.id)).catch((e) => toast.error(e.message))}
+                                  className="text-xs text-red-400 hover:underline"
+                                >
+                                  Удалить
+                                </button>
+                              </div>
+                              {item.data.description && <p className="text-sm text-stone mb-1">{item.data.description}</p>}
+                              <p className="text-xs text-stone/60">
+                                {new Date(item.data.created_at).toLocaleString('ru-RU')}
+                                {item.data.price != null && ` · ${item.data.price.toLocaleString('ru-RU')} ₽`}
+                              </p>
                             </div>
-                            <p className="text-right font-semibold text-accent mt-2">
-                              {o.total.toLocaleString('ru-RU')} ₽
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))}
+                        </div>
+                      );
+                    })()}
                     <button onClick={() => setSelectedUser(null)} className="btn-secondary mt-6 w-full !py-2">Закрыть</button>
                   </>
                 )}

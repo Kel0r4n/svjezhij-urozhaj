@@ -8,6 +8,7 @@ from ..models import Product, User
 from ..schemas import ProductCreate, ProductUpdate, ProductResponse
 from ..auth import get_current_admin, get_optional_user
 from ..category_helpers import ensure_category_exists
+from ..search_utils import product_search_filter
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -27,7 +28,9 @@ def list_products(
     if not (user and user.is_admin and include_inactive):
         query = query.filter(Product.is_active.is_(True))
     if search:
-        query = query.filter(Product.name.ilike(f"%{search}%"))
+        cond = product_search_filter(Product.name, search)
+        if cond is not None:
+            query = query.filter(cond)
     if category:
         query = query.filter(Product.category == category)
     return query.order_by(Product.created_at.desc()).all()

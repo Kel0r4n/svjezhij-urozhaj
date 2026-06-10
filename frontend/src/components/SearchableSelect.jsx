@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { smartMatch } from '../utils/search';
 
 export default function SearchableSelect({
   options,
@@ -15,9 +16,7 @@ export default function SearchableSelect({
 
   const selected = options.find((o) => o[valueKey] === value);
 
-  const filtered = options.filter((o) =>
-    String(o[labelKey]).toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = options.filter((o) => smartMatch(o[labelKey], query));
 
   useEffect(() => {
     const handler = (e) => {

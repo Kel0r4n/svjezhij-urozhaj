@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { api } from '../api';
 import ProductCard from '../components/ProductCard';
 import Spinner from '../components/Spinner';
+import useDebounce from '../hooks/useDebounce';
 import { useAuth } from '../context/AuthContext';
 import { useCategories } from '../context/CategoriesContext';
 
@@ -9,17 +10,18 @@ export default function Home() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
   const [category, setCategory] = useState('');
   const { user } = useAuth();
   const { categories } = useCategories();
 
   useEffect(() => {
     setLoading(true);
-    api.getProducts(search || undefined, category || undefined)
+    api.getProducts(debouncedSearch || undefined, category || undefined)
       .then(setProducts)
       .catch(() => setProducts([]))
       .finally(() => setLoading(false));
-  }, [search, category]);
+  }, [debouncedSearch, category]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">

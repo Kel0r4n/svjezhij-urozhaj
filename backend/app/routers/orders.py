@@ -7,6 +7,7 @@ from ..database import get_db
 from ..models import Order, OrderItem, OrderStatus, CartItem, Product, User, DeliveryAddress, DeliveryDate
 from ..schemas import OrderCreate, OrderResponse, OrderListResponse
 from ..auth import get_current_user
+from ..delivery_schedule import resolve_next_delivery
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -24,13 +25,22 @@ def create_order(
     if not addr:
         raise HTTPException(status_code=400, detail="Адрес доставки недоступен")
 
-    ddate = db.query(DeliveryDate).filter(
-        DeliveryDate.id == data.delivery_date_id,
-        DeliveryDate.is_active.is_(True),
-        DeliveryDate.delivery_date >= date.today(),
-    ).first()
-    if not ddate:
-        raise HTTPException(status_code=400, detail="Дата доставки недоступна")
+    if data.delivery_date_id:
+        ddate = db.query(DeliveryDate).filter(
+            DeliveryDate.id == data.delivery_date_id,
+            DeliveryDate.is_active.is_(True),
+            DeliveryDate.delivery_date >= date.today(),
+        ).first()
+        if not ddate:
+            raise HTTPException(status_code=400, detail="Дата доставки недоступна")
+    else:
+        try:
+            info = resolve_next_delivery(db, data.delivery_address_id)
+            ddate = db.query(DeliveryDate).filter(DeliveryDate.id == info["delivery_date_id"]).first()
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if not ddate or not ddate.is_active:
+            raise HTTPException(status_code=400, detail="Дата доставки недоступна")
 
     cart_items = (
         db.query(CartItem)

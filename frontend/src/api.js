@@ -151,6 +151,41 @@ export const api = {
   updateOrderStatus: (id, status) => request(`/admin/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   getUsers: (search) => request(`/admin/users${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   getAdminUser: (id) => request(`/admin/users/${id}`),
+  createUserEvent: (userId, data) => request(`/admin/users/${userId}/events`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteUserEvent: (userId, eventId) => request(`/admin/users/${userId}/events/${eventId}`, { method: 'DELETE' }),
+
+  getDeliveryManifest: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request(`/admin/deliveries/manifest?${q}`);
+  },
+  exportDeliveryManifest: async (day, address) => {
+    const p = new URLSearchParams({ day });
+    if (address) p.set('address', address);
+    const token = localStorage.getItem('access_token');
+    const res = await fetch(`${API_BASE}/admin/deliveries/export?${p}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new ApiError(err.detail || 'Ошибка выгрузки', res.status);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deliveries_${day}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  getSchedule: () => request('/admin/schedule'),
+  createScheduleSlot: (data) => request('/admin/schedule', { method: 'POST', body: JSON.stringify(data) }),
+  deleteScheduleSlot: (id) => request(`/admin/schedule/${id}`, { method: 'DELETE' }),
+  getExceptions: () => request('/admin/exceptions'),
+  createException: (data) => request('/admin/exceptions', { method: 'POST', body: JSON.stringify(data) }),
+  toggleException: (id) => request(`/admin/exceptions/${id}/toggle`, { method: 'PATCH' }),
+
+  getDeliveryNext: (addressId) => request(`/delivery/next/${addressId}`),
   toggleAdmin: (id) => request(`/admin/users/${id}/admin`, { method: 'PATCH' }),
   bulkUpdateStock: (items) => request('/admin/stock/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
 

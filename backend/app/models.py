@@ -68,6 +68,52 @@ class DeliveryDate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class DeliveryScheduleSlot(Base):
+    """День недели и время доставки для конкретного адреса (0 = понедельник)."""
+    __tablename__ = "delivery_schedule_slots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    delivery_address_id: Mapped[int] = mapped_column(Integer, ForeignKey("delivery_addresses.id"), nullable=False)
+    weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # 0–6, пн–вс
+    delivery_time: Mapped[str] = mapped_column(String(5), nullable=False)  # HH:MM
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DeliveryException(Base):
+    """Перенос или отмена доставки на дату для выбранных адресов."""
+    __tablename__ = "delivery_exceptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    exception_date: Mapped[date] = mapped_column(Date, nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)  # postponed | cancelled
+    new_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    message: Mapped[str] = mapped_column(Text, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DeliveryExceptionAddress(Base):
+    __tablename__ = "delivery_exception_addresses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    exception_id: Mapped[int] = mapped_column(Integer, ForeignKey("delivery_exceptions.id"), nullable=False)
+    delivery_address_id: Mapped[int] = mapped_column(Integer, ForeignKey("delivery_addresses.id"), nullable=False)
+
+
+class UserEvent(Base):
+    """Комментарии и ручные события по клиенту (CRM)."""
+    __tablename__ = "user_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    admin_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Product(Base):
     __tablename__ = "products"
 

@@ -18,9 +18,9 @@ export default function Cart() {
   const { items, total, loading, updateQuantity, removeItem, clearCart } = useCart();
   const [removeId, setRemoveId] = useState(null);
   const [checkout, setCheckout] = useState(false);
-  const [form, setForm] = useState({ delivery_address_id: null, delivery_date_id: null });
+  const [form, setForm] = useState({ delivery_address_id: null });
   const [addresses, setAddresses] = useState([]);
-  const [dates, setDates] = useState([]);
+  const [deliveryPreview, setDeliveryPreview] = useState(null);
   const [loadingDelivery, setLoadingDelivery] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
@@ -28,23 +28,42 @@ export default function Cart() {
   useEffect(() => {
     if (!checkout) return;
     setLoadingDelivery(true);
-    Promise.all([api.getDeliveryAddresses(), api.getDeliveryDates()])
-      .then(([addrs, dts]) => {
-        setAddresses(addrs);
-        setDates(dts);
-      })
+    api.getDeliveryAddresses()
+      .then(setAddresses)
       .catch((err) => toast.error(err.message))
       .finally(() => setLoadingDelivery(false));
   }, [checkout]);
+
+  useEffect(() => {
+    if (!form.delivery_address_id) {
+      setDeliveryPreview(null);
+      return;
+    }
+    const addr = addresses.find((a) => a.id === form.delivery_address_id);
+    if (addr?.next_delivery_date) {
+      setDeliveryPreview({
+        date: addr.next_delivery_date,
+        time: addr.next_delivery_time,
+        weekday: addr.next_delivery_weekday,
+        notice: addr.delivery_notice,
+      });
+      return;
+    }
+    api.getDeliveryNext(form.delivery_address_id)
+      .then((info) => setDeliveryPreview({
+        date: info.delivery_date,
+        time: info.delivery_time,
+        weekday: info.weekday_label,
+        notice: info.notice,
+      }))
+      .catch(() => setDeliveryPreview(null));
+  }, [form.delivery_address_id, addresses]);
 
   const handleOrder = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.createOrder({
-        delivery_address_id: form.delivery_address_id,
-        delivery_date_id: form.delivery_date_id,
-      });
+      await api.createOrder({ delivery_address_id: form.delivery_address_id });
       await clearCart();
       toast.success('Заказ оформлен!');
       navigate('/orders');
@@ -69,7 +88,6 @@ export default function Cart() {
   }
 
   const addressOptions = addresses.map((a) => ({ value: a.id, label: a.address }));
-  const dateOptions = dates.map((d) => ({ value: d.id, label: formatDate(d.delivery_date) }));
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
@@ -132,33 +150,35 @@ export default function Cart() {
                 <SearchableSelect
                   options={addressOptions}
                   value={form.delivery_address_id}
-                  onChange={(v) => setForm({ ...form, delivery_address_id: v })}
+                  onChange={(v) => setForm({ delivery_address_id: v })}
                   placeholder="Выберите адрес"
                   required
                 />
               )}
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Дата доставки</label>
-              {dateOptions.length === 0 ? (
-                <p className="text-sm text-stone/60">Нет доступных дат доставки.</p>
-              ) : (
-                <SearchableSelect
-                  options={dateOptions}
-                  value={form.delivery_date_id}
-                  onChange={(v) => setForm({ ...form, delivery_date_id: v })}
-                  placeholder="Выберите дату"
-                  required
-                />
-              )}
-            </div>
+
+            {deliveryPreview && (
+              <div className="rounded-soft border border-accent/30 bg-accent/10 p-4 text-sm">
+                <p className="font-medium text-stone mb-1">Ближайшая доставка</p>
+                <p>
+                  {deliveryPreview.weekday}, {formatDate(deliveryPreview.date)}
+                  {deliveryPreview.time && ` · около ${deliveryPreview.time}`}
+                </p>
+                {deliveryPreview.notice && (
+                  <p className="mt-2 text-amber-800/90 bg-amber-50 rounded-soft px-3 py-2">
+                    ⚠️ {deliveryPreview.notice}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button type="button" onClick={() => setCheckout(false)} className="btn-secondary flex-1">
                 Назад
               </button>
               <button
                 type="submit"
-                disabled={submitting || !form.delivery_address_id || !form.delivery_date_id}
+                disabled={submitting || !form.delivery_address_id}
                 className="btn-primary flex-1"
               >
                 {submitting ? 'Оформление...' : 'Подтвердить заказ'}

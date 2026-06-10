@@ -2,18 +2,28 @@ import math
 from datetime import date, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
-from ..models import Order, OrderItem, OrderStatus, Product, User, DeliveryAddress, DeliveryDate, ProductCategory
+from ..models import (
+    Order, OrderItem, OrderStatus, Product, User, DeliveryAddress, DeliveryDate,
+    DeliveryScheduleSlot, DeliveryException, DeliveryExceptionAddress, UserEvent,
+)
 from ..schemas import (
     DashboardStats, AdminOrderResponse, AdminOrderListResponse, OrderStatusUpdate,
     AdminUserResponse, AdminUserDetailResponse, StockBulkUpdateRequest, ProductResponse, SalesAnalyticsResponse,
     DeliveryAddressCreate, DeliveryAddressResponse, DeliveryDateCreate, DeliveryDateResponse,
     DayDetailResponse, CategoryCreate, CategoryUpdate, CategoryResponse,
+    DeliveryScheduleSlotCreate, DeliveryScheduleSlotResponse,
+    DeliveryExceptionCreate, DeliveryExceptionResponse,
+    DeliveryManifestResponse, DeliveryManifestRow,
+    UserEventCreate, UserEventResponse,
 )
 from ..auth import get_current_admin
 from ..utils import get_dashboard_stats, get_sales_analytics, get_day_detail
+from ..search_utils import apply_user_search
+from ..export_utils import build_manifest_rows, manifest_to_xlsx
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -211,17 +221,7 @@ def admin_list_orders(
     if address:
         query = query.filter(Order.address == address)
     if search:
-        from sqlalchemy import or_
-        like = f"%{search}%"
-        query = query.filter(
-            or_(
-                User.phone.ilike(like),
-                User.email.ilike(like),
-                User.first_name.ilike(like),
-                User.last_name.ilike(like),
-                User.patronymic.ilike(like),
-            )
-        )
+        query = apply_user_search(query, search)
     total = query.count()
     pages = max(1, math.ceil(total / per_page))
     orders = (
@@ -299,8 +299,7 @@ def list_users(
 ):
     query = db.query(User)
     if search:
-        from sqlalchemy import or_
-        query = query.filter(or_(User.email.ilike(f"%{search}%"), User.phone.ilike(f"%{search}%")))
+        query = apply_user_search(query, search)
     return query.order_by(User.created_at.desc()).all()
 
 
@@ -322,6 +321,12 @@ def get_user_detail(
         .all()
     )
     order_responses = [_admin_order_response(o) for o in orders]
+    events = (
+        db.query(UserEvent)
+        .filter(UserEvent.user_id == user_id)
+        .order_by(UserEvent.created_at.desc())
+        .all()
+    )
     return AdminUserDetailResponse(
         id=user.id,
         email=user.email,
@@ -334,6 +339,7 @@ def get_user_detail(
         orders=order_responses,
         orders_count=len(order_responses),
         orders_total=sum(o.total for o in orders),
+        events=events,
     )
 
 
@@ -348,6 +354,196 @@ def toggle_admin(user_id: int, db: Session = Depends(get_db), current_admin: Use
     db.commit()
     db.refresh(user)
     return user
+
+
+def _manifest_orders_query(db: Session, day: date, address: Optional[str] = None):
+    query = (
+        db.query(Order)
+        .join(User)
+        .options(joinedload(Order.items), joinedload(Order.user))
+        .filter(Order.delivery_date == day, Order.status != OrderStatus.CANCELLED)
+    )
+    if address:
+        query = query.filter(Order.address == address)
+    return query.order_by(Order.address, User.last_name, User.first_name).all()
+
+
+@router.get("/deliveries/manifest", response_model=DeliveryManifestResponse)
+def delivery_manifest(
+    day: date = Query(..., description="Дата доставки"),
+    address: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    orders = _manifest_orders_query(db, day, address)
+    rows = [DeliveryManifestRow(**r) for r in build_manifest_rows(orders)]
+    return DeliveryManifestResponse(date=day, rows=rows, total_rows=len(rows))
+
+
+@router.get("/deliveries/export")
+def export_delivery_manifest(
+    day: date = Query(...),
+    address: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    orders = _manifest_orders_query(db, day, address)
+    rows = build_manifest_rows(orders)
+    content = manifest_to_xlsx(rows, sheet_title=str(day))
+    filename = f"deliveries_{day.isoformat()}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/schedule", response_model=list[DeliveryScheduleSlotResponse])
+def list_schedule(db: Session = Depends(get_db), _=Depends(get_current_admin)):
+    return db.query(DeliveryScheduleSlot).order_by(
+        DeliveryScheduleSlot.delivery_address_id, DeliveryScheduleSlot.weekday
+    ).all()
+
+
+@router.post("/schedule", response_model=DeliveryScheduleSlotResponse, status_code=201)
+def create_schedule_slot(
+    data: DeliveryScheduleSlotCreate,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    addr = db.query(DeliveryAddress).filter(DeliveryAddress.id == data.delivery_address_id).first()
+    if not addr:
+        raise HTTPException(status_code=404, detail="Адрес не найден")
+    slot = DeliveryScheduleSlot(**data.model_dump())
+    db.add(slot)
+    db.commit()
+    db.refresh(slot)
+    return slot
+
+
+@router.delete("/schedule/{slot_id}", status_code=204)
+def delete_schedule_slot(slot_id: int, db: Session = Depends(get_db), _=Depends(get_current_admin)):
+    slot = db.query(DeliveryScheduleSlot).filter(DeliveryScheduleSlot.id == slot_id).first()
+    if not slot:
+        raise HTTPException(status_code=404, detail="Слот не найден")
+    db.delete(slot)
+    db.commit()
+
+
+@router.get("/exceptions", response_model=list[DeliveryExceptionResponse])
+def list_exceptions(db: Session = Depends(get_db), _=Depends(get_current_admin)):
+    rows = db.query(DeliveryException).order_by(DeliveryException.exception_date.desc()).all()
+    result = []
+    for exc in rows:
+        addr_ids = [
+            r.delivery_address_id
+            for r in db.query(DeliveryExceptionAddress).filter(
+                DeliveryExceptionAddress.exception_id == exc.id
+            ).all()
+        ]
+        result.append(DeliveryExceptionResponse(
+            id=exc.id,
+            exception_date=exc.exception_date,
+            action=exc.action,
+            new_date=exc.new_date,
+            message=exc.message,
+            is_active=exc.is_active,
+            address_ids=addr_ids,
+        ))
+    return result
+
+
+@router.post("/exceptions", response_model=DeliveryExceptionResponse, status_code=201)
+def create_exception(
+    data: DeliveryExceptionCreate,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    if data.action == "postponed" and not data.new_date:
+        raise HTTPException(status_code=400, detail="Укажите новую дату для переноса")
+    exc = DeliveryException(
+        exception_date=data.exception_date,
+        action=data.action,
+        new_date=data.new_date,
+        message=data.message,
+    )
+    db.add(exc)
+    db.flush()
+    for aid in data.address_ids:
+        db.add(DeliveryExceptionAddress(exception_id=exc.id, delivery_address_id=aid))
+    db.commit()
+    return DeliveryExceptionResponse(
+        id=exc.id,
+        exception_date=exc.exception_date,
+        action=exc.action,
+        new_date=exc.new_date,
+        message=exc.message,
+        is_active=exc.is_active,
+        address_ids=data.address_ids,
+    )
+
+
+@router.patch("/exceptions/{exc_id}/toggle", response_model=DeliveryExceptionResponse)
+def toggle_exception(exc_id: int, db: Session = Depends(get_db), _=Depends(get_current_admin)):
+    exc = db.query(DeliveryException).filter(DeliveryException.id == exc_id).first()
+    if not exc:
+        raise HTTPException(status_code=404, detail="Исключение не найдено")
+    exc.is_active = not exc.is_active
+    db.commit()
+    addr_ids = [
+        r.delivery_address_id
+        for r in db.query(DeliveryExceptionAddress).filter(
+            DeliveryExceptionAddress.exception_id == exc.id
+        ).all()
+    ]
+    return DeliveryExceptionResponse(
+        id=exc.id,
+        exception_date=exc.exception_date,
+        action=exc.action,
+        new_date=exc.new_date,
+        message=exc.message,
+        is_active=exc.is_active,
+        address_ids=addr_ids,
+    )
+
+
+@router.post("/users/{user_id}/events", response_model=UserEventResponse, status_code=201)
+def create_user_event(
+    user_id: int,
+    data: UserEventCreate,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    event = UserEvent(
+        user_id=user_id,
+        admin_id=current_admin.id,
+        title=data.title,
+        description=data.description,
+        price=data.price,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@router.delete("/users/{user_id}/events/{event_id}", status_code=204)
+def delete_user_event(
+    user_id: int,
+    event_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    event = db.query(UserEvent).filter(
+        UserEvent.id == event_id, UserEvent.user_id == user_id
+    ).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Событие не найдено")
+    db.delete(event)
+    db.commit()
 
 
 @router.post("/stock/bulk", response_model=list[ProductResponse])
