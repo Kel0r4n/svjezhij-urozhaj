@@ -3,6 +3,7 @@
 from datetime import date
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import DeliveryAddress, DeliveryDate, DeliveryScheduleSlot
@@ -25,6 +26,14 @@ def ensure_delivery_date(db: Session, delivery_day: date) -> DeliveryDate:
     db.add(row)
     db.flush()
     return row
+
+
+def _clear_slots_for_dates(db: Session, dates: set[date]) -> None:
+    for d in dates:
+        db.query(DeliveryScheduleSlot).filter(
+            DeliveryScheduleSlot.slot_date == d,
+        ).delete(synchronize_session=False)
+    db.flush()
 
 
 def list_schedule_blocks(db: Session) -> list[dict]:
@@ -68,23 +77,38 @@ def save_schedule_block(
     if previous_date and previous_date != slot_date:
         dates_to_clear.add(previous_date)
 
-    for d in dates_to_clear:
-        db.query(DeliveryScheduleSlot).filter(DeliveryScheduleSlot.slot_date == d).delete()
+    try:
+        _clear_slots_for_dates(db, dates_to_clear)
 
-    for entry in entries:
-        db.add(DeliveryScheduleSlot(
-            delivery_address_id=entry["delivery_address_id"],
-            slot_date=slot_date,
-            delivery_time=normalize_time(entry["delivery_time"]),
-        ))
+        for entry in entries:
+            db.add(DeliveryScheduleSlot(
+                delivery_address_id=entry["delivery_address_id"],
+                slot_date=slot_date,
+                delivery_time=normalize_time(entry["delivery_time"]),
+                is_active=True,
+            ))
 
-    ensure_delivery_date(db, slot_date)
-    db.commit()
-    return next(b for b in list_schedule_blocks(db) if b["slot_date"] == slot_date)
+        ensure_delivery_date(db, slot_date)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Этот адрес уже есть в графике на выбранную дату. Измените день или выберите другой ЖК.",
+        )
+
+    blocks = list_schedule_blocks(db)
+    block = next((b for b in blocks if b["slot_date"] == slot_date), None)
+    if not block:
+        raise HTTPException(status_code=500, detail="Не удалось сохранить график")
+    return block
 
 
 def delete_schedule_block(db: Session, slot_date: date) -> None:
-    deleted = db.query(DeliveryScheduleSlot).filter(DeliveryScheduleSlot.slot_date == slot_date).delete()
+    deleted = db.query(DeliveryScheduleSlot).filter(
+        DeliveryScheduleSlot.slot_date == slot_date,
+    ).delete(synchronize_session=False)
+    db.flush()
     if not deleted:
         raise HTTPException(status_code=404, detail="День доставки не найден")
     db.commit()

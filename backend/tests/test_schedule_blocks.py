@@ -3,6 +3,27 @@
 from datetime import date, timedelta
 
 
+def test_schedule_blocks_replace_seed_day(client, admin_headers):
+    """Повторное сохранение на дату из seed не должно падать с IntegrityError."""
+    listed = client.get("/admin/schedule/blocks", headers=admin_headers)
+    assert listed.status_code == 200
+    blocks = listed.json()
+    assert blocks, "seed должен создать график"
+    block = blocks[0]
+    addr_id = block["entries"][0]["delivery_address_id"]
+
+    resp = client.put(
+        "/admin/schedule/blocks",
+        headers=admin_headers,
+        json={
+            "slot_date": block["slot_date"],
+            "entries": [{"delivery_address_id": addr_id, "delivery_time": "21:00"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["entries"][0]["delivery_time"] == "21:00"
+
+
 def test_schedule_blocks_crud(client, admin_headers):
     route_day = (date.today() + timedelta(days=10)).isoformat()
     addr = client.get("/admin/addresses", headers=admin_headers).json()[0]
