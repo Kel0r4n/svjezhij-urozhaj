@@ -25,16 +25,20 @@ const TABS = [
   { id: 'stock', label: 'Склад' },
 ];
 
-const WEEKDAYS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
-
 function shiftDay(iso, delta) {
   const d = parseISODate(iso);
   d.setDate(d.getDate() + delta);
   return toISODate(d);
 }
 
-const STATUS_OPTIONS = ['created', 'confirmed', 'delivered', 'cancelled'];
-const STATUS_LABELS = { created: 'Создан', confirmed: 'Подтверждён', delivered: 'Доставлен', cancelled: 'Отменён' };
+const STATUS_OPTIONS = ['created', 'confirmed', 'in_transit', 'delivered', 'cancelled'];
+const STATUS_LABELS = {
+  created: 'Создан',
+  confirmed: 'Подтверждён',
+  in_transit: 'В пути',
+  delivered: 'Доставлен',
+  cancelled: 'Отменён',
+};
 
 const emptyProduct = {
   name: '', price: '', description: '', category: '', stock: 0, is_active: true,
@@ -88,6 +92,7 @@ export default function Admin() {
   const manifestPrintRef = useRef(null);
   const [ordersViewMode, setOrdersViewMode] = useState('orders');
   const [manifest, setManifest] = useState({ rows: [], total_rows: 0 });
+  const [deliveryRoute, setDeliveryRoute] = useState({ stops: [] });
   const debouncedOrderSearch = useDebounce(orderFilter.search, 300);
 
   const [users, setUsers] = useState([]);
@@ -99,7 +104,9 @@ export default function Admin() {
 
   const [scheduleSlots, setScheduleSlots] = useState([]);
   const [exceptions, setExceptions] = useState([]);
-  const [slotForm, setSlotForm] = useState({ delivery_address_id: '', weekday: '2', delivery_time: '19:00' });
+  const [slotForm, setSlotForm] = useState({ delivery_address_id: '', slot_date: '', delivery_time: '19:00' });
+  const [importDate, setImportDate] = useState('');
+  const [importText, setImportText] = useState('');
   const [excForm, setExcForm] = useState({
     exception_date: '', action: 'postponed', new_date: '', message: '', address_ids: [],
   });
@@ -112,7 +119,7 @@ export default function Admin() {
   const loadSalesAnalytics = useCallback(() => {
     api.getSalesAnalytics({ days: analyticsDays, categories: filterCategories })
       .then(setSalesData)
-      .catch((e) => toast.error(e.message));
+      .catch(() => setSalesData(null));
   }, [analyticsDays, filterCategories]);
 
   const loadDayDetail = useCallback((day) => {
@@ -168,10 +175,17 @@ export default function Admin() {
 
   const loadManifest = () => {
     setLoading(true);
-    const params = { day: orderFilter.delivery_from };
+    const day = orderFilter.delivery_from;
+    const params = { day };
     if (orderFilter.address) params.address = orderFilter.address;
-    api.getDeliveryManifest(params)
-      .then(setManifest)
+    Promise.all([
+      api.getDeliveryManifest(params),
+      api.getDeliveryRoute(day).catch(() => ({ stops: [] })),
+    ])
+      .then(([m, r]) => {
+        setManifest(m);
+        setDeliveryRoute(r);
+      })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
   };
@@ -240,11 +254,9 @@ export default function Admin() {
   };
 
   const loadAdminCategories = () => {
-    setLoading(true);
     api.getAdminCategories()
       .then(setAdminCategories)
-      .catch((e) => toast.error(e.message))
-      .finally(() => setLoading(false));
+      .catch(() => {});
   };
 
   const loadStock = () => {
@@ -268,7 +280,10 @@ export default function Admin() {
   useEffect(() => {
     if (tab === 'dashboard') loadDashboard();
     if (tab === 'products') { loadProducts(); loadAdminCategories(); }
-    if (tab === 'categories') loadAdminCategories();
+    if (tab === 'categories') {
+      setLoading(true);
+      api.getAdminCategories().then(setAdminCategories).catch(() => {}).finally(() => setLoading(false));
+    }
     if (tab === 'dashboard') loadAdminCategories();
     if (tab === 'addresses') loadAddresses();
     if (tab === 'dates') loadDeliveryDates();
@@ -838,35 +853,36 @@ export default function Admin() {
             >
               ›
             </button>
-            {ordersViewMode === 'orders' && (
-              <>
-                <button
-                  ref={calendarBtnRef}
-                  type="button"
-                  onClick={() => setCalendarOpen((v) => !v)}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
-                    calendarOpen
-                      ? 'border-accent bg-accent/20 text-accent'
-                      : 'border-sand bg-[#FDF8F3] text-stone hover:border-accent/50 hover:bg-accent/10'
-                  }`}
-                  title="Выбрать период"
-                  aria-label="Календарь"
-                >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                  </svg>
-                </button>
-                <DateRangePicker
-                  open={calendarOpen}
-                  onClose={() => setCalendarOpen(false)}
-                  anchorRef={calendarBtnRef}
-                  value={{ from: orderFilter.delivery_from, to: orderFilter.delivery_to }}
-                  onChange={({ from, to }) => {
-                    setOrderFilter((f) => ({ ...f, delivery_from: from, delivery_to: to }));
-                  }}
-                />
-              </>
-            )}
+            <button
+              ref={calendarBtnRef}
+              type="button"
+              onClick={() => setCalendarOpen((v) => !v)}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                calendarOpen
+                  ? 'border-accent bg-accent/20 text-accent'
+                  : 'border-sand bg-[#FDF8F3] text-stone hover:border-accent/50 hover:bg-accent/10'
+              }`}
+              title={ordersViewMode === 'deliveries' ? 'Выбрать день' : 'Выбрать период'}
+              aria-label="Календарь"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+              </svg>
+            </button>
+            <DateRangePicker
+              open={calendarOpen}
+              onClose={() => setCalendarOpen(false)}
+              anchorRef={calendarBtnRef}
+              singleDay={ordersViewMode === 'deliveries'}
+              value={{ from: orderFilter.delivery_from, to: orderFilter.delivery_to }}
+              onChange={({ from, to }) => {
+                setOrderFilter((f) => ({
+                  ...f,
+                  delivery_from: from,
+                  delivery_to: ordersViewMode === 'deliveries' ? from : to,
+                }));
+              }}
+            />
             <span className="text-xs text-stone/70">
               {ordersViewMode === 'deliveries'
                 ? `${manifest.total_rows} позиций`
@@ -986,11 +1002,27 @@ export default function Admin() {
               )}
             </>
           ) : (
+            <>
+            {deliveryRoute.stops?.length > 0 && (
+              <div className="card p-4 mb-4">
+                <h3 className="font-medium mb-3">Маршрут на {formatDate(orderFilter.delivery_from)}</h3>
+                <div className="space-y-2">
+                  {deliveryRoute.stops.map((stop, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-3 text-sm border-b border-sand/40 pb-2 last:border-0">
+                      <span className="font-mono font-medium w-14">{stop.time}</span>
+                      <span className="flex-1">{stop.address}</span>
+                      <span className="text-stone/70">{stop.orders_count} зак. · {stop.items_count} поз.</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="overflow-x-auto" ref={manifestPrintRef}>
               <table className="w-full card text-sm">
                 <thead>
                   <tr className="border-b border-sand">
                     <th className="p-3 text-left">Контакт</th>
+                    <th className="p-3 text-left">Телефон</th>
                     <th className="p-3 text-left">Товар</th>
                     <th className="p-3 text-center">Цена</th>
                     <th className="p-3 text-center">Количество</th>
@@ -999,11 +1031,12 @@ export default function Admin() {
                 </thead>
                 <tbody>
                   {manifest.rows.length === 0 && (
-                    <tr><td colSpan={5} className="p-8 text-center text-stone/70">Нет доставок на этот день</td></tr>
+                    <tr><td colSpan={6} className="p-8 text-center text-stone/70">Нет доставок на этот день</td></tr>
                   )}
                   {manifest.rows.map((row, i) => (
                     <tr key={i} className="border-b border-sand/50">
                       <td className="p-3">{row.contact}</td>
+                      <td className="p-3 whitespace-nowrap">{row.phone || '—'}</td>
                       <td className="p-3">{row.product}</td>
                       <td className="p-3 text-center">{row.price.toLocaleString('ru-RU')}</td>
                       <td className="p-3 text-center">{row.quantity}</td>
@@ -1013,6 +1046,7 @@ export default function Admin() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
 
           {selectedOrder && (
@@ -1041,9 +1075,40 @@ export default function Admin() {
       {tab === 'schedule' && !loading && (
         <div className="animate-fade-in max-w-4xl mx-auto space-y-8">
           <section>
+            <h3 className="font-semibold mb-3">Импорт маршрута из текста</h3>
+            <p className="text-sm text-stone/70 mb-4">
+              Вставьте блок из чата (формат «19:00 — Микрогород»), укажите дату маршрута — адреса сопоставятся автоматически.
+            </p>
+            <form
+              className="card p-4 space-y-3 mb-6"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const res = await api.importSchedule({ route_date: importDate, text: importText });
+                  loadSchedule();
+                  toast.success(`Добавлено: ${res.count}. Не найдено: ${res.skipped.length ? res.skipped.join(', ') : '—'}`);
+                  if (!res.skipped.length) setImportText('');
+                } catch (err) {
+                  toast.error(err.message);
+                }
+              }}
+            >
+              <input type="date" required value={importDate} onChange={(e) => setImportDate(e.target.value)} className="input-field w-48" />
+              <textarea
+                required
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                placeholder={'19:00 — Среда\n19:20 — 21/19\n21:00 — Май'}
+                className="input-field min-h-[120px] font-mono text-sm"
+              />
+              <button type="submit" className="btn-primary !px-4 !py-2">Импортировать</button>
+            </form>
+          </section>
+
+          <section>
             <h3 className="font-semibold mb-3">График по адресам</h3>
             <p className="text-sm text-stone/70 mb-4">
-              Укажите день недели и время для каждого ЖК. Клиент увидит ближайшую доставку при оформлении заказа.
+              Укажите конкретную дату и время для каждого ЖК.
             </p>
             <form
               className="card p-4 flex flex-wrap gap-3 mb-4"
@@ -1052,7 +1117,7 @@ export default function Admin() {
                 try {
                   await api.createScheduleSlot({
                     delivery_address_id: Number(slotForm.delivery_address_id),
-                    weekday: Number(slotForm.weekday),
+                    slot_date: slotForm.slot_date,
                     delivery_time: slotForm.delivery_time,
                   });
                   setSlotForm({ ...slotForm, delivery_time: '19:00' });
@@ -1067,9 +1132,7 @@ export default function Admin() {
                 <option value="">Адрес</option>
                 {addresses.map((a) => <option key={a.id} value={a.id}>{a.address}</option>)}
               </select>
-              <select value={slotForm.weekday} onChange={(e) => setSlotForm({ ...slotForm, weekday: e.target.value })} className="input-field w-40">
-                {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
-              </select>
+              <input type="date" required value={slotForm.slot_date} onChange={(e) => setSlotForm({ ...slotForm, slot_date: e.target.value })} className="input-field w-44" />
               <input type="time" required value={slotForm.delivery_time} onChange={(e) => setSlotForm({ ...slotForm, delivery_time: e.target.value })} className="input-field w-32" />
               <button type="submit" className="btn-primary !px-4 !py-2">Добавить</button>
             </form>
@@ -1078,7 +1141,7 @@ export default function Admin() {
                 const addr = addresses.find((a) => a.id === s.delivery_address_id);
                 return (
                   <div key={s.id} className="card p-3 flex items-center justify-between gap-3">
-                    <span>{addr?.address || '—'} · {WEEKDAYS[s.weekday]} · {s.delivery_time}</span>
+                    <span>{addr?.address || '—'} · {formatDate(s.slot_date)} · {s.delivery_time}</span>
                     <button type="button" onClick={() => api.deleteScheduleSlot(s.id).then(loadSchedule).catch((e) => toast.error(e.message))} className="text-sm text-red-400 hover:underline">Удалить</button>
                   </div>
                 );
@@ -1257,9 +1320,10 @@ export default function Admin() {
                               <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
                                 <span className="font-medium">Заказ №{item.data.id}</span>
                                 <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                  item.data.status === 'delivered' ? 'bg-accent/30' :
-                                  item.data.status === 'cancelled' ? 'bg-red-100 text-red-600' :
-                                  'bg-sand/70'
+                                item.data.status === 'delivered' ? 'bg-accent/30' :
+                                item.data.status === 'in_transit' ? 'bg-purple-100 text-purple-700' :
+                                item.data.status === 'cancelled' ? 'bg-red-100 text-red-600' :
+                                'bg-sand/70'
                                 }`}>
                                   {STATUS_LABELS[item.data.status] || item.data.status}
                                 </span>

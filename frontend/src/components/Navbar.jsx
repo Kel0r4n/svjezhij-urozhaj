@@ -85,6 +85,8 @@ export default function Navbar() {
           {/* Десктоп */}
           <div className="hidden md:flex items-center gap-4 lg:gap-6 shrink-0">
             <NavLink to="/">Каталог</NavLink>
+            <NavLink to="/prices">Прайс</NavLink>
+            <NavLink to="/delivery-info">Доставка</NavLink>
             {authLinks}
           </div>
 
@@ -107,6 +109,8 @@ export default function Navbar() {
         {menuOpen && (
           <div className="md:hidden mt-3 pt-3 border-t border-sand/60 flex flex-col gap-3 animate-fade-in pb-1">
             <NavLink to="/" onClick={closeMenu}>Каталог</NavLink>
+            <NavLink to="/prices" onClick={closeMenu}>Прайс</NavLink>
+            <NavLink to="/delivery-info" onClick={closeMenu}>Доставка</NavLink>
             {user ? (
               <>
                 <NavLink to="/orders" onClick={closeMenu}>Заказы</NavLink>

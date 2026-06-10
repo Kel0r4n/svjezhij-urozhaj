@@ -14,6 +14,8 @@ import Cart from './pages/Cart';
 import Orders from './pages/Orders';
 import Profile from './pages/Profile';
 import Admin from './pages/Admin';
+import DeliveryInfo from './pages/DeliveryInfo';
+import PriceList from './pages/PriceList';
 
 export default function App() {
   return (
@@ -26,6 +28,8 @@ export default function App() {
             <main className="flex-1">
               <Routes>
                 <Route path="/" element={<Home />} />
+                <Route path="/delivery-info" element={<DeliveryInfo />} />
+                <Route path="/prices" element={<PriceList />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/cart" element={<ProtectedRoute><Cart /></ProtectedRoute>} />

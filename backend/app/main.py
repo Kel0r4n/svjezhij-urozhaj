@@ -8,9 +8,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import inspect, text
-
 from .database import Base, engine, settings
+from .migrate import run_migrations
 from .routers import admin, cart, categories, delivery, orders, products, users
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -24,29 +23,13 @@ def serve_frontend_enabled() -> bool:
     return val in ("1", "true", "yes") and FRONTEND_DIST.is_dir()
 
 
-def _migrate_product_image_columns():
-    insp = inspect(engine)
-    if "products" not in insp.get_table_names():
-        return
-    existing = {c["name"] for c in insp.get_columns("products")}
-    alters = []
-    if "image_zoom" not in existing:
-        alters.append("ALTER TABLE products ADD COLUMN image_zoom FLOAT DEFAULT 1.0")
-    if "image_pan_x" not in existing:
-        alters.append("ALTER TABLE products ADD COLUMN image_pan_x FLOAT DEFAULT 0.0")
-    if "image_pan_y" not in existing:
-        alters.append("ALTER TABLE products ADD COLUMN image_pan_y FLOAT DEFAULT 0.0")
-    if not alters:
-        return
-    with engine.begin() as conn:
-        for sql in alters:
-            conn.execute(text(sql))
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    _migrate_product_image_columns()
+    try:
+        run_migrations()
+    except Exception as exc:
+        print(f"[WARN] Alembic migrations: {exc}")
     if serve_frontend_enabled():
         print(f"[OK] Публичный режим: сайт + API ({FRONTEND_DIST})")
     yield

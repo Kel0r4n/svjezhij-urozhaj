@@ -6,6 +6,7 @@ from .database import Base, SessionLocal, engine, settings
 from .models import (
     DeliveryAddress,
     DeliveryDate,
+    DeliveryScheduleSlot,
     Order,
     OrderItem,
     OrderStatus,
@@ -81,8 +82,23 @@ def run_seed(*, reset: bool = False) -> bool:
             "г. Москва, пр. Мира, д. 45, подъезд 2",
             "г. Химки, ул. Ленина, д. 8",
         ]
+        addr_rows = []
         for a in addresses:
-            db.add(DeliveryAddress(address=a))
+            row = DeliveryAddress(address=a)
+            db.add(row)
+            addr_rows.append(row)
+        db.commit()
+        for row in addr_rows:
+            db.refresh(row)
+
+        today = date.today()
+        route_day = today + timedelta(days=3)
+        for i, row in enumerate(addr_rows):
+            db.add(DeliveryScheduleSlot(
+                delivery_address_id=row.id,
+                slot_date=route_day,
+                delivery_time=f"{18 + i}:00",
+            ))
         db.commit()
 
         today = date.today()

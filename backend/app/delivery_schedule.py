@@ -1,6 +1,6 @@
 """Расчёт ближайшей доставки по графику адреса и исключениям."""
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -17,8 +17,6 @@ WEEKDAY_NAMES = [
     "Понедельник", "Вторник", "Среда", "Четверг",
     "Пятница", "Суббота", "Воскресенье",
 ]
-
-MAX_LOOKAHEAD_DAYS = 90
 
 
 def _active_exception(db: Session, address_id: int, on_date: date) -> Optional[DeliveryException]:
@@ -49,10 +47,6 @@ def resolve_next_delivery(
     address_id: int,
     from_date: Optional[date] = None,
 ) -> dict:
-    """
-    Возвращает ближайшую доставку для адреса:
-    delivery_date, delivery_time, weekday_label, notice, delivery_date_id
-    """
     addr = db.query(DeliveryAddress).filter(DeliveryAddress.id == address_id).first()
     if not addr:
         raise ValueError("Адрес не найден")
@@ -63,7 +57,9 @@ def resolve_next_delivery(
         .filter(
             DeliveryScheduleSlot.delivery_address_id == address_id,
             DeliveryScheduleSlot.is_active.is_(True),
+            DeliveryScheduleSlot.slot_date >= start,
         )
+        .order_by(DeliveryScheduleSlot.slot_date, DeliveryScheduleSlot.delivery_time)
         .all()
     )
 
@@ -85,15 +81,8 @@ def resolve_next_delivery(
             "delivery_date_id": dd.id,
         }
 
-    slot_by_weekday = {s.weekday: s for s in slots}
-    weekdays = set(slot_by_weekday)
-
-    for offset in range(MAX_LOOKAHEAD_DAYS):
-        candidate = start + timedelta(days=offset)
-        if candidate.weekday() not in weekdays:
-            continue
-
-        slot = slot_by_weekday[candidate.weekday()]
+    for slot in slots:
+        candidate = slot.slot_date
         exc = _active_exception(db, address_id, candidate)
 
         if exc and exc.action == "cancelled":
@@ -118,7 +107,39 @@ def resolve_next_delivery(
             "delivery_date_id": dd.id,
         }
 
-    raise ValueError("Нет доступных дат доставки в ближайшие месяцы")
+    raise ValueError("Нет доступных дат доставки")
+
+
+def upcoming_for_address(db: Session, address_id: int, limit: int = 5) -> list[dict]:
+    start = date.today()
+    slots = (
+        db.query(DeliveryScheduleSlot)
+        .filter(
+            DeliveryScheduleSlot.delivery_address_id == address_id,
+            DeliveryScheduleSlot.is_active.is_(True),
+            DeliveryScheduleSlot.slot_date >= start,
+        )
+        .order_by(DeliveryScheduleSlot.slot_date, DeliveryScheduleSlot.delivery_time)
+        .limit(limit * 2)
+        .all()
+    )
+    result = []
+    for slot in slots:
+        exc = _active_exception(db, address_id, slot.slot_date)
+        if exc and exc.action == "cancelled":
+            continue
+        final_date = exc.new_date if exc and exc.action == "postponed" and exc.new_date else slot.slot_date
+        if final_date < start:
+            continue
+        result.append({
+            "date": final_date,
+            "time": slot.delivery_time,
+            "weekday_label": WEEKDAY_NAMES[final_date.weekday()],
+            "notice": exc.message if exc else None,
+        })
+        if len(result) >= limit:
+            break
+    return result
 
 
 def preview_for_address(db: Session, address_id: int) -> Optional[dict]:

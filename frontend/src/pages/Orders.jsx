@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 const STATUS_LABELS = {
   created: 'Создан',
   confirmed: 'Подтверждён',
+  in_transit: 'В пути',
   delivered: 'Доставлен',
   cancelled: 'Отменён',
 };
@@ -21,6 +22,7 @@ function formatDeliveryDate(d) {
 const STATUS_COLORS = {
   created: 'bg-yellow-100 text-yellow-700',
   confirmed: 'bg-blue-100 text-blue-700',
+  in_transit: 'bg-purple-100 text-purple-700',
   delivered: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-700',
 };

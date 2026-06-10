@@ -142,18 +142,42 @@ class DeliveryAddressPublicResponse(DeliveryAddressResponse):
 
 class DeliveryScheduleSlotCreate(BaseModel):
     delivery_address_id: int
-    weekday: int = Field(ge=0, le=6)
-    delivery_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    slot_date: date
+    delivery_time: str = Field(pattern=r"^\d{1,2}:\d{2}$")
 
 
 class DeliveryScheduleSlotResponse(BaseModel):
     id: int
     delivery_address_id: int
-    weekday: int
+    slot_date: date
     delivery_time: str
     is_active: bool
 
     model_config = {"from_attributes": True}
+
+
+class ScheduleImportRequest(BaseModel):
+    route_date: date
+    text: str = Field(min_length=3)
+
+
+class DeliveryUpcomingSlot(BaseModel):
+    date: date
+    time: str
+    weekday_label: str
+    notice: Optional[str] = None
+
+
+class DeliveryRouteStop(BaseModel):
+    time: str
+    address: str
+    orders_count: int
+    items_count: int
+
+
+class DeliveryRouteResponse(BaseModel):
+    date: date
+    stops: list[DeliveryRouteStop]
 
 
 class DeliveryExceptionCreate(BaseModel):
@@ -390,7 +414,7 @@ class AdminOrderListResponse(BaseModel):
 
 
 class OrderStatusUpdate(BaseModel):
-    status: str = Field(pattern="^(created|confirmed|delivered|cancelled)$")
+    status: str = Field(pattern="^(created|confirmed|in_transit|delivered|cancelled)$")
 
 
 # --- Admin ---
@@ -449,6 +473,7 @@ class AdminUserDetailResponse(AdminUserResponse):
 
 class DeliveryManifestRow(BaseModel):
     contact: str
+    phone: str
     product: str
     price: float
     quantity: int

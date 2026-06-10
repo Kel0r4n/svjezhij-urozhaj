@@ -8,8 +8,9 @@ from ..schemas import (
     DeliveryAddressPublicResponse,
     DeliveryDateResponse,
     DeliveryNextResponse,
+    DeliveryUpcomingSlot,
 )
-from ..delivery_schedule import preview_for_address, resolve_next_delivery, WEEKDAY_NAMES
+from ..delivery_schedule import preview_for_address, resolve_next_delivery, upcoming_for_address, WEEKDAY_NAMES
 
 router = APIRouter(prefix="/delivery", tags=["delivery"])
 
@@ -36,6 +37,12 @@ def list_addresses(db: Session = Depends(get_db)):
             delivery_notice=preview.get("notice") if preview else None,
         ))
     return result
+
+
+@router.get("/upcoming/{address_id}", response_model=list[DeliveryUpcomingSlot])
+def upcoming_delivery(address_id: int, db: Session = Depends(get_db)):
+    rows = upcoming_for_address(db, address_id)
+    return [DeliveryUpcomingSlot(**r) for r in rows]
 
 
 @router.get("/next/{address_id}", response_model=DeliveryNextResponse)

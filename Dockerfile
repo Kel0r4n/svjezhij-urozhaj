@@ -20,6 +20,8 @@ RUN apt-get update \
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY backend/alembic.ini .
+COPY backend/alembic ./alembic
 COPY backend/app ./app
 COPY --from=frontend-build /build/frontend/dist ./frontend/dist
 COPY deploy/entrypoint.sh /entrypoint.sh

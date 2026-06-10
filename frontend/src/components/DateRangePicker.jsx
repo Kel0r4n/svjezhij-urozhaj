@@ -21,7 +21,7 @@ function isBetween(iso, from, to) {
   return iso >= from && iso <= to;
 }
 
-export default function DateRangePicker({ open, onClose, value, onChange, anchorRef }) {
+export default function DateRangePicker({ open, onClose, value, onChange, anchorRef, singleDay = false }) {
   const panelRef = useRef(null);
   const [viewDate, setViewDate] = useState(() => parseISODate(value.from));
   const [draftFrom, setDraftFrom] = useState(value.from);
@@ -64,6 +64,11 @@ export default function DateRangePicker({ open, onClose, value, onChange, anchor
   }
 
   const handleDayClick = (iso) => {
+    if (singleDay) {
+      onChange({ from: iso, to: iso });
+      onClose();
+      return;
+    }
     if (!pickingEnd || !draftFrom) {
       setDraftFrom(iso);
       setDraftTo(iso);
@@ -164,19 +169,23 @@ export default function DateRangePicker({ open, onClose, value, onChange, anchor
         </div>
 
         <p className="mt-3 text-center text-xs text-stone/80">
-          {pickingEnd && draftFrom
-            ? 'Выберите конечную дату'
-            : formatRangeLabel(draftFrom, draftTo)}
+          {singleDay
+            ? 'Выберите день'
+            : pickingEnd && draftFrom
+              ? 'Выберите конечную дату'
+              : formatRangeLabel(draftFrom, draftTo)}
         </p>
 
-        <div className="mt-3 flex gap-2">
-          <button type="button" onClick={setThisWeek} className="btn-secondary flex-1 !py-2 text-sm">
-            Эта неделя
-          </button>
-          <button type="button" onClick={apply} className="btn-primary flex-1 !py-2 text-sm">
-            Применить
-          </button>
-        </div>
+        {!singleDay && (
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={setThisWeek} className="btn-secondary flex-1 !py-2 text-sm">
+              Эта неделя
+            </button>
+            <button type="button" onClick={apply} className="btn-primary flex-1 !py-2 text-sm">
+              Применить
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

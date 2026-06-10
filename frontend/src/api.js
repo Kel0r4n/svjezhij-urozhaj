@@ -186,6 +186,9 @@ export const api = {
   toggleException: (id) => request(`/admin/exceptions/${id}/toggle`, { method: 'PATCH' }),
 
   getDeliveryNext: (addressId) => request(`/delivery/next/${addressId}`),
+  getDeliveryUpcoming: (addressId) => request(`/delivery/upcoming/${addressId}`),
+  getDeliveryRoute: (day) => request(`/admin/deliveries/route?day=${day}`),
+  importSchedule: (data) => request('/admin/schedule/import', { method: 'POST', body: JSON.stringify(data) }),
   toggleAdmin: (id) => request(`/admin/users/${id}/admin`, { method: 'PATCH' }),
   bulkUpdateStock: (items) => request('/admin/stock/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
 

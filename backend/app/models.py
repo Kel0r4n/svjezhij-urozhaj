@@ -9,6 +9,7 @@ from .database import Base
 class OrderStatus(str, enum.Enum):
     CREATED = "created"
     CONFIRMED = "confirmed"
+    IN_TRANSIT = "in_transit"
     DELIVERED = "delivered"
     CANCELLED = "cancelled"
 
@@ -69,12 +70,12 @@ class DeliveryDate(Base):
 
 
 class DeliveryScheduleSlot(Base):
-    """День недели и время доставки для конкретного адреса (0 = понедельник)."""
+    """Конкретная дата и время доставки для адреса."""
     __tablename__ = "delivery_schedule_slots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     delivery_address_id: Mapped[int] = mapped_column(Integer, ForeignKey("delivery_addresses.id"), nullable=False)
-    weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # 0–6, пн–вс
+    slot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     delivery_time: Mapped[str] = mapped_column(String(5), nullable=False)  # HH:MM
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

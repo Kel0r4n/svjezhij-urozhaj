@@ -19,11 +19,13 @@ from ..schemas import (
     DeliveryExceptionCreate, DeliveryExceptionResponse,
     DeliveryManifestResponse, DeliveryManifestRow,
     UserEventCreate, UserEventResponse,
+    ScheduleImportRequest, DeliveryRouteResponse, DeliveryRouteStop,
 )
 from ..auth import get_current_admin
 from ..utils import get_dashboard_stats, get_sales_analytics, get_day_detail
 from ..search_utils import apply_user_search
 from ..export_utils import build_manifest_rows, manifest_to_xlsx
+from ..schedule_import import import_schedule_text
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -401,7 +403,7 @@ def export_delivery_manifest(
 @router.get("/schedule", response_model=list[DeliveryScheduleSlotResponse])
 def list_schedule(db: Session = Depends(get_db), _=Depends(get_current_admin)):
     return db.query(DeliveryScheduleSlot).order_by(
-        DeliveryScheduleSlot.delivery_address_id, DeliveryScheduleSlot.weekday
+        DeliveryScheduleSlot.slot_date, DeliveryScheduleSlot.delivery_time
     ).all()
 
 
@@ -414,11 +416,55 @@ def create_schedule_slot(
     addr = db.query(DeliveryAddress).filter(DeliveryAddress.id == data.delivery_address_id).first()
     if not addr:
         raise HTTPException(status_code=404, detail="Адрес не найден")
-    slot = DeliveryScheduleSlot(**data.model_dump())
+    parts = data.delivery_time.split(":")
+    delivery_time = f"{int(parts[0]):02d}:{parts[1]}"
+    slot = DeliveryScheduleSlot(
+        delivery_address_id=data.delivery_address_id,
+        slot_date=data.slot_date,
+        delivery_time=delivery_time,
+    )
     db.add(slot)
     db.commit()
     db.refresh(slot)
     return slot
+
+
+@router.post("/schedule/import")
+def import_schedule(
+    data: ScheduleImportRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    return import_schedule_text(db, data.route_date, data.text)
+
+
+@router.get("/deliveries/route", response_model=DeliveryRouteResponse)
+def delivery_route(
+    day: date = Query(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    slots = (
+        db.query(DeliveryScheduleSlot, DeliveryAddress)
+        .join(DeliveryAddress, DeliveryScheduleSlot.delivery_address_id == DeliveryAddress.id)
+        .filter(
+            DeliveryScheduleSlot.slot_date == day,
+            DeliveryScheduleSlot.is_active.is_(True),
+        )
+        .order_by(DeliveryScheduleSlot.delivery_time)
+        .all()
+    )
+    stops = []
+    for slot, addr in slots:
+        orders = _manifest_orders_query(db, day, addr.address)
+        items_count = sum(len(o.items) for o in orders)
+        stops.append(DeliveryRouteStop(
+            time=slot.delivery_time,
+            address=addr.address,
+            orders_count=len(orders),
+            items_count=items_count,
+        ))
+    return DeliveryRouteResponse(date=day, stops=stops)
 
 
 @router.delete("/schedule/{slot_id}", status_code=204)
