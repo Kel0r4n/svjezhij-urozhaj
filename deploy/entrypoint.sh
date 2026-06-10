@@ -14,8 +14,16 @@ if [ -z "$SECRET_KEY" ] || [ "$SECRET_KEY" = "dev-secret-key-change-me" ]; then
   echo "[WARN] SECRET_KEY не задан или дефолтный — смените в панели RelaxDev!"
 fi
 
-echo "[entrypoint] Миграции БД (Alembic)..."
-python -c "from app.migrate import run_migrations; run_migrations()"
+echo "[entrypoint] Таблицы БД + миграции (Alembic)..."
+python -c "
+from app.database import Base, engine
+from app.migrate import run_migrations
+Base.metadata.create_all(bind=engine)
+try:
+    run_migrations()
+except Exception as exc:
+    print(f'[WARN] Alembic migrations: {exc}')
+"
 
 if [ "$RUN_SEED" = "1" ]; then
   echo "[entrypoint] Заполнение БД (RUN_SEED=1)..."
