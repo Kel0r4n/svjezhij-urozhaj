@@ -1,12 +1,10 @@
-from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import DeliveryAddress, DeliveryDate
+from ..models import DeliveryAddress
 from ..schemas import (
     DeliveryAddressPublicResponse,
-    DeliveryDateResponse,
     DeliveryNextResponse,
     DeliveryUpcomingSlot,
 )
@@ -53,13 +51,3 @@ def next_delivery(address_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e))
     return DeliveryNextResponse(**info)
 
-
-@router.get("/dates", response_model=list[DeliveryDateResponse])
-def list_dates(db: Session = Depends(get_db)):
-    today = date.today()
-    return (
-        db.query(DeliveryDate)
-        .filter(DeliveryDate.is_active.is_(True), DeliveryDate.delivery_date >= today)
-        .order_by(DeliveryDate.delivery_date)
-        .all()
-    )

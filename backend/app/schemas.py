@@ -140,25 +140,27 @@ class DeliveryAddressPublicResponse(DeliveryAddressResponse):
     delivery_notice: Optional[str] = None
 
 
-class DeliveryScheduleSlotCreate(BaseModel):
+class ScheduleBlockEntryCreate(BaseModel):
     delivery_address_id: int
+    delivery_time: str = Field(min_length=4, max_length=8)
+
+
+class ScheduleBlockSave(BaseModel):
     slot_date: date
-    delivery_time: str = Field(pattern=r"^\d{1,2}:\d{2}$")
+    entries: list[ScheduleBlockEntryCreate] = Field(min_length=1)
+    previous_date: Optional[date] = None
 
 
-class DeliveryScheduleSlotResponse(BaseModel):
+class ScheduleBlockEntryResponse(BaseModel):
     id: int
     delivery_address_id: int
-    slot_date: date
     delivery_time: str
-    is_active: bool
-
-    model_config = {"from_attributes": True}
+    address: str
 
 
-class ScheduleImportRequest(BaseModel):
-    route_date: date
-    text: str = Field(min_length=3)
+class ScheduleBlockResponse(BaseModel):
+    slot_date: date
+    entries: list[ScheduleBlockEntryResponse]
 
 
 class DeliveryUpcomingSlot(BaseModel):
@@ -180,52 +182,12 @@ class DeliveryRouteResponse(BaseModel):
     stops: list[DeliveryRouteStop]
 
 
-class DeliveryExceptionCreate(BaseModel):
-    exception_date: date
-    action: str = Field(pattern=r"^(postponed|cancelled)$")
-    new_date: Optional[date] = None
-    message: str = Field(default="", max_length=2000)
-    address_ids: list[int] = Field(min_length=1)
-
-
-class DeliveryExceptionResponse(BaseModel):
-    id: int
-    exception_date: date
-    action: str
-    new_date: Optional[date]
-    message: str
-    is_active: bool
-    address_ids: list[int] = []
-
-    model_config = {"from_attributes": True}
-
-
 class DeliveryNextResponse(BaseModel):
     delivery_date: date
     delivery_time: Optional[str]
     weekday_label: str
     notice: Optional[str]
     delivery_date_id: int
-
-
-class DeliveryDateCreate(BaseModel):
-    delivery_date: date
-
-    @field_validator("delivery_date")
-    @classmethod
-    def must_be_future(cls, v: date) -> date:
-        if v < date.today():
-            raise ValueError("Дата доставки должна быть в будущем")
-        return v
-
-
-class DeliveryDateResponse(BaseModel):
-    id: int
-    delivery_date: date
-    is_active: bool
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 # --- Category ---
@@ -414,7 +376,7 @@ class AdminOrderListResponse(BaseModel):
 
 
 class OrderStatusUpdate(BaseModel):
-    status: str = Field(pattern="^(created|confirmed|in_transit|delivered|cancelled)$")
+    status: str = Field(pattern="^(created|confirmed|delivered|cancelled)$")
 
 
 # --- Admin ---

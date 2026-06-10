@@ -76,21 +76,6 @@ def test_admin_create_product(client, admin_headers):
     assert data["category"] == "fruits"
 
 
-def test_admin_delivery_date(client, admin_headers):
-    r = client.post(
-        "/admin/delivery-dates",
-        headers=admin_headers,
-        json={"delivery_date": "2099-12-31"},
-    )
-    assert r.status_code == 201, r.text
-    assert r.json()["delivery_date"] == "2099-12-31"
-
-    listed = client.get("/admin/delivery-dates", headers=admin_headers)
-    assert listed.status_code == 200
-    dates = [d["delivery_date"] for d in listed.json()]
-    assert "2099-12-31" in dates
-
-
 def test_admin_sales_analytics(client, admin_headers):
     r = client.get("/admin/analytics/sales?days=30", headers=admin_headers)
     assert r.status_code == 200

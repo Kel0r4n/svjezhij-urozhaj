@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Enum as SAEnum
+from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Enum as SAEnum, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
@@ -9,7 +9,7 @@ from .database import Base
 class OrderStatus(str, enum.Enum):
     CREATED = "created"
     CONFIRMED = "confirmed"
-    IN_TRANSIT = "in_transit"
+    IN_TRANSIT = "in_transit"  # legacy в БД; в админке не используется
     DELIVERED = "delivered"
     CANCELLED = "cancelled"
 
@@ -72,6 +72,9 @@ class DeliveryDate(Base):
 class DeliveryScheduleSlot(Base):
     """Конкретная дата и время доставки для адреса."""
     __tablename__ = "delivery_schedule_slots"
+    __table_args__ = (
+        UniqueConstraint("delivery_address_id", "slot_date", name="uq_schedule_address_date"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     delivery_address_id: Mapped[int] = mapped_column(Integer, ForeignKey("delivery_addresses.id"), nullable=False)

@@ -19,7 +19,6 @@ const TABS = [
   { id: 'categories', label: 'Категории' },
   { id: 'addresses', label: 'Адреса' },
   { id: 'schedule', label: 'График' },
-  { id: 'dates', label: 'Даты доставки' },
   { id: 'orders', label: 'Заказы' },
   { id: 'users', label: 'Пользователи' },
   { id: 'stock', label: 'Склад' },
@@ -31,14 +30,15 @@ function shiftDay(iso, delta) {
   return toISODate(d);
 }
 
-const STATUS_OPTIONS = ['created', 'confirmed', 'in_transit', 'delivered', 'cancelled'];
+const STATUS_OPTIONS = ['created', 'confirmed', 'delivered', 'cancelled'];
 const STATUS_LABELS = {
   created: 'Создан',
   confirmed: 'Подтверждён',
-  in_transit: 'В пути',
   delivered: 'Доставлен',
   cancelled: 'Отменён',
 };
+
+const emptyScheduleEntry = () => ({ delivery_address_id: '', delivery_time: '19:00' });
 
 const emptyProduct = {
   name: '', price: '', description: '', category: '', stock: 0, is_active: true,
@@ -78,9 +78,6 @@ export default function Admin() {
   const [addresses, setAddresses] = useState([]);
   const [newAddress, setNewAddress] = useState('');
 
-  const [deliveryDates, setDeliveryDates] = useState([]);
-  const [newDate, setNewDate] = useState('');
-
   const [orders, setOrders] = useState({ items: [], page: 1, pages: 1, total: 0 });
   const [orderFilter, setOrderFilter] = useState(() => {
     const week = getCurrentWeekRange();
@@ -102,14 +99,9 @@ export default function Admin() {
   const [userDetailLoading, setUserDetailLoading] = useState(false);
   const [eventForm, setEventForm] = useState({ title: '', description: '', price: '' });
 
-  const [scheduleSlots, setScheduleSlots] = useState([]);
-  const [exceptions, setExceptions] = useState([]);
-  const [slotForm, setSlotForm] = useState({ delivery_address_id: '', slot_date: '', delivery_time: '19:00' });
-  const [importDate, setImportDate] = useState('');
-  const [importText, setImportText] = useState('');
-  const [excForm, setExcForm] = useState({
-    exception_date: '', action: 'postponed', new_date: '', message: '', address_ids: [],
-  });
+  const [scheduleBlocks, setScheduleBlocks] = useState([]);
+  const [blockEditor, setBlockEditor] = useState(null);
+  const [deleteBlockDate, setDeleteBlockDate] = useState(null);
 
   const [stockItems, setStockItems] = useState([]);
 
@@ -149,14 +141,6 @@ export default function Admin() {
       .finally(() => setLoading(false));
   };
 
-  const loadDeliveryDates = () => {
-    setLoading(true);
-    api.getAdminDeliveryDates()
-      .then(setDeliveryDates)
-      .catch((e) => toast.error(e.message))
-      .finally(() => setLoading(false));
-  };
-
   const loadOrders = (page = 1) => {
     setLoading(true);
     const params = {
@@ -192,14 +176,78 @@ export default function Admin() {
 
   const loadSchedule = () => {
     setLoading(true);
-    Promise.all([api.getSchedule(), api.getExceptions(), api.getAdminAddresses()])
-      .then(([slots, excs, addrs]) => {
-        setScheduleSlots(slots);
-        setExceptions(excs);
+    Promise.all([api.getScheduleBlocks(), api.getAdminAddresses()])
+      .then(([blocks, addrs]) => {
+        setScheduleBlocks(blocks);
         setAddresses(addrs);
       })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
+  };
+
+  const openNewBlock = () => {
+    setBlockEditor({
+      slot_date: '',
+      previous_date: null,
+      entries: [emptyScheduleEntry()],
+      isNew: true,
+    });
+  };
+
+  const openEditBlock = (block) => {
+    setBlockEditor({
+      slot_date: block.slot_date,
+      previous_date: block.slot_date,
+      isNew: false,
+      entries: block.entries.map((e) => ({
+        delivery_address_id: String(e.delivery_address_id),
+        delivery_time: e.delivery_time?.slice(0, 5) || '19:00',
+      })),
+    });
+  };
+
+  const saveBlockEditor = async (e) => {
+    e.preventDefault();
+    if (!blockEditor) return;
+    const entries = blockEditor.entries
+      .filter((row) => row.delivery_address_id)
+      .map((row) => ({
+        delivery_address_id: Number(row.delivery_address_id),
+        delivery_time: row.delivery_time,
+      }));
+    if (!blockEditor.slot_date) {
+      toast.error('Укажите дату доставки');
+      return;
+    }
+    if (!entries.length) {
+      toast.error('Добавьте хотя бы один адрес');
+      return;
+    }
+    try {
+      await api.saveScheduleBlock({
+        slot_date: blockEditor.slot_date,
+        previous_date: blockEditor.previous_date !== blockEditor.slot_date ? blockEditor.previous_date : null,
+        entries,
+      });
+      toast.success(blockEditor.isNew ? 'День доставки добавлен' : 'График обновлён');
+      setBlockEditor(null);
+      loadSchedule();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const confirmDeleteBlock = async () => {
+    if (!deleteBlockDate) return;
+    try {
+      await api.deleteScheduleBlock(deleteBlockDate);
+      toast.success('День доставки удалён');
+      setDeleteBlockDate(null);
+      if (blockEditor?.previous_date === deleteBlockDate) setBlockEditor(null);
+      loadSchedule();
+    } catch (err) {
+      toast.error(err.message);
+    }
   };
 
   const openUserDetail = (userId) => {
@@ -286,7 +334,6 @@ export default function Admin() {
     }
     if (tab === 'dashboard') loadAdminCategories();
     if (tab === 'addresses') loadAddresses();
-    if (tab === 'dates') loadDeliveryDates();
     if (tab === 'schedule') loadSchedule();
     if (tab === 'orders') loadAddresses();
     if (tab === 'stock') loadStock();
@@ -410,18 +457,6 @@ export default function Admin() {
       setNewAddress('');
       toast.success('Адрес добавлен');
       loadAddresses();
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
-
-  const handleAddDate = async (e) => {
-    e.preventDefault();
-    try {
-      await api.createDeliveryDate(newDate);
-      setNewDate('');
-      toast.success('Дата добавлена');
-      loadDeliveryDates();
     } catch (err) {
       toast.error(err.message);
     }
@@ -789,36 +824,6 @@ export default function Admin() {
         </div>
       )}
 
-      {tab === 'dates' && !loading && (
-        <div className="animate-fade-in max-w-2xl mx-auto w-full">
-          <form onSubmit={handleAddDate} className="card p-6 mb-6 flex gap-3">
-            <input
-              type="date"
-              required
-              value={newDate}
-              onChange={(e) => setNewDate(e.target.value)}
-              className="input-field flex-1"
-            />
-            <button type="submit" className="btn-primary !px-4 !py-2">Добавить</button>
-          </form>
-          <div className="space-y-2">
-            {deliveryDates.map((d) => (
-              <div key={d.id} className={`card p-4 flex items-center justify-between gap-4 ${!d.is_active ? 'opacity-50' : ''}`}>
-                <span className="min-w-0 text-left">{formatDate(d.delivery_date)}</span>
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={() => api.toggleDeliveryDate(d.id).then(loadDeliveryDates).catch((e) => toast.error(e.message))} className="text-sm text-accent hover:underline">
-                    {d.is_active ? 'Скрыть' : 'Показать'}
-                  </button>
-                  <button onClick={() => api.deleteDeliveryDate(d.id).then(loadDeliveryDates).catch((e) => toast.error(e.message))} className="text-sm text-red-400 hover:underline">
-                    Удалить
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {tab === 'orders' && !loading && (
         <div className="animate-fade-in">
           <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -1073,156 +1078,145 @@ export default function Admin() {
       )}
 
       {tab === 'schedule' && !loading && (
-        <div className="animate-fade-in max-w-4xl mx-auto space-y-8">
-          <section>
-            <h3 className="font-semibold mb-3">Импорт маршрута из текста</h3>
-            <p className="text-sm text-stone/70 mb-4">
-              Вставьте блок из чата (формат «19:00 — Микрогород»), укажите дату маршрута — адреса сопоставятся автоматически.
-            </p>
-            <form
-              className="card p-4 space-y-3 mb-6"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  const res = await api.importSchedule({ route_date: importDate, text: importText });
-                  loadSchedule();
-                  toast.success(`Добавлено: ${res.count}. Не найдено: ${res.skipped.length ? res.skipped.join(', ') : '—'}`);
-                  if (!res.skipped.length) setImportText('');
-                } catch (err) {
-                  toast.error(err.message);
-                }
-              }}
-            >
-              <input type="date" required value={importDate} onChange={(e) => setImportDate(e.target.value)} className="input-field w-48" />
-              <textarea
-                required
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                placeholder={'19:00 — Среда\n19:20 — 21/19\n21:00 — Май'}
-                className="input-field min-h-[120px] font-mono text-sm"
-              />
-              <button type="submit" className="btn-primary !px-4 !py-2">Импортировать</button>
-            </form>
-          </section>
-
-          <section>
-            <h3 className="font-semibold mb-3">График по адресам</h3>
-            <p className="text-sm text-stone/70 mb-4">
-              Укажите конкретную дату и время для каждого ЖК.
-            </p>
-            <form
-              className="card p-4 flex flex-wrap gap-3 mb-4"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  await api.createScheduleSlot({
-                    delivery_address_id: Number(slotForm.delivery_address_id),
-                    slot_date: slotForm.slot_date,
-                    delivery_time: slotForm.delivery_time,
-                  });
-                  setSlotForm({ ...slotForm, delivery_time: '19:00' });
-                  loadSchedule();
-                  toast.success('Слот добавлен');
-                } catch (err) {
-                  toast.error(err.message);
-                }
-              }}
-            >
-              <select required value={slotForm.delivery_address_id} onChange={(e) => setSlotForm({ ...slotForm, delivery_address_id: e.target.value })} className="input-field flex-1 min-w-[180px]">
-                <option value="">Адрес</option>
-                {addresses.map((a) => <option key={a.id} value={a.id}>{a.address}</option>)}
-              </select>
-              <input type="date" required value={slotForm.slot_date} onChange={(e) => setSlotForm({ ...slotForm, slot_date: e.target.value })} className="input-field w-44" />
-              <input type="time" required value={slotForm.delivery_time} onChange={(e) => setSlotForm({ ...slotForm, delivery_time: e.target.value })} className="input-field w-32" />
-              <button type="submit" className="btn-primary !px-4 !py-2">Добавить</button>
-            </form>
-            <div className="space-y-2">
-              {scheduleSlots.map((s) => {
-                const addr = addresses.find((a) => a.id === s.delivery_address_id);
-                return (
-                  <div key={s.id} className="card p-3 flex items-center justify-between gap-3">
-                    <span>{addr?.address || '—'} · {formatDate(s.slot_date)} · {s.delivery_time}</span>
-                    <button type="button" onClick={() => api.deleteScheduleSlot(s.id).then(loadSchedule).catch((e) => toast.error(e.message))} className="text-sm text-red-400 hover:underline">Удалить</button>
-                  </div>
-                );
-              })}
+        <div className="animate-fade-in max-w-3xl mx-auto space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-lg">График доставки</h3>
+              <p className="text-sm text-stone/70 mt-1">
+                Один день — один блок: укажите дату и расписание по адресам (время + ЖК).
+              </p>
             </div>
-          </section>
+            {!blockEditor && (
+              <button type="button" onClick={openNewBlock} className="btn-primary !px-4 !py-2">
+                + День доставки
+              </button>
+            )}
+          </div>
 
-          <section>
-            <h3 className="font-semibold mb-3">Исключения (перенос / отмена)</h3>
-            <p className="text-sm text-stone/70 mb-4">
-              Например: «Доставка в ЖК Среда переносится на следующую неделю» — выберите дату, адреса и новую дату.
-            </p>
-            <form
-              className="card p-4 space-y-3 mb-4"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  await api.createException({
-                    exception_date: excForm.exception_date,
-                    action: excForm.action,
-                    new_date: excForm.action === 'postponed' ? excForm.new_date : null,
-                    message: excForm.message,
-                    address_ids: excForm.address_ids,
-                  });
-                  setExcForm({ exception_date: '', action: 'postponed', new_date: '', message: '', address_ids: [] });
-                  loadSchedule();
-                  toast.success('Исключение создано');
-                } catch (err) {
-                  toast.error(err.message);
-                }
-              }}
-            >
-              <div className="flex flex-wrap gap-3">
-                <input type="date" required value={excForm.exception_date} onChange={(e) => setExcForm({ ...excForm, exception_date: e.target.value })} className="input-field w-44" />
-                <select value={excForm.action} onChange={(e) => setExcForm({ ...excForm, action: e.target.value })} className="input-field w-40">
-                  <option value="postponed">Перенос</option>
-                  <option value="cancelled">Отмена</option>
-                </select>
-                {excForm.action === 'postponed' && (
-                  <input type="date" required value={excForm.new_date} onChange={(e) => setExcForm({ ...excForm, new_date: e.target.value })} className="input-field w-44" placeholder="Новая дата" />
-                )}
+          {blockEditor && (
+            <form onSubmit={saveBlockEditor} className="card p-5 border-2 border-accent/30 shadow-md space-y-4 animate-slide-up">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h4 className="font-semibold">{blockEditor.isNew ? 'Новый день доставки' : 'Редактирование дня'}</h4>
+                <button type="button" onClick={() => setBlockEditor(null)} className="text-sm text-stone hover:text-ink">Отмена</button>
               </div>
-              <textarea value={excForm.message} onChange={(e) => setExcForm({ ...excForm, message: e.target.value })} placeholder="Сообщение для клиентов..." className="input-field min-h-[72px]" />
-              <div className="flex flex-wrap gap-2">
-                {addresses.map((a) => (
-                  <label key={a.id} className="flex items-center gap-1 text-sm cursor-pointer">
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Дата доставки</label>
+                <input
+                  type="date"
+                  required
+                  value={blockEditor.slot_date}
+                  onChange={(e) => setBlockEditor({ ...blockEditor, slot_date: e.target.value })}
+                  className="input-field w-48"
+                />
+              </div>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium">Маршрут</label>
+                {blockEditor.entries.map((row, idx) => (
+                  <div key={idx} className="flex flex-wrap gap-2 items-center bg-sand/40 rounded-xl p-3">
                     <input
-                      type="checkbox"
-                      checked={excForm.address_ids.includes(a.id)}
+                      type="time"
+                      required
+                      value={row.delivery_time}
                       onChange={(e) => {
-                        setExcForm((f) => ({
-                          ...f,
-                          address_ids: e.target.checked
-                            ? [...f.address_ids, a.id]
-                            : f.address_ids.filter((x) => x !== a.id),
-                        }));
+                        const entries = [...blockEditor.entries];
+                        entries[idx] = { ...entries[idx], delivery_time: e.target.value };
+                        setBlockEditor({ ...blockEditor, entries });
                       }}
+                      className="input-field w-28 shrink-0"
                     />
-                    {a.address}
-                  </label>
+                    <select
+                      required
+                      value={row.delivery_address_id}
+                      onChange={(e) => {
+                        const entries = [...blockEditor.entries];
+                        entries[idx] = { ...entries[idx], delivery_address_id: e.target.value };
+                        setBlockEditor({ ...blockEditor, entries });
+                      }}
+                      className="input-field flex-1 min-w-[200px]"
+                    >
+                      <option value="">Выберите адрес</option>
+                      {addresses.filter((a) => a.is_active).map((a) => (
+                        <option key={a.id} value={a.id}>{a.address}</option>
+                      ))}
+                    </select>
+                    {blockEditor.entries.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setBlockEditor({
+                          ...blockEditor,
+                          entries: blockEditor.entries.filter((_, i) => i !== idx),
+                        })}
+                        className="text-sm text-red-400 hover:underline px-2"
+                      >
+                        Убрать
+                      </button>
+                    )}
+                  </div>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setBlockEditor({
+                    ...blockEditor,
+                    entries: [...blockEditor.entries, emptyScheduleEntry()],
+                  })}
+                  className="text-sm text-accent hover:underline"
+                >
+                  + Добавить адрес в маршрут
+                </button>
               </div>
-              <button type="submit" className="btn-primary !px-4 !py-2" disabled={!excForm.address_ids.length}>Сохранить исключение</button>
+              <button type="submit" className="btn-primary w-full sm:w-auto !px-6 !py-2.5">
+                {blockEditor.isNew ? 'Создать день' : 'Сохранить изменения'}
+              </button>
             </form>
-            <div className="space-y-2">
-              {exceptions.map((ex) => (
-                <div key={ex.id} className={`card p-4 ${!ex.is_active ? 'opacity-50' : ''}`}>
-                  <div className="flex justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{formatDate(ex.exception_date)} → {ex.action === 'postponed' && ex.new_date ? formatDate(ex.new_date) : 'отмена'}</p>
-                      {ex.message && <p className="text-sm text-stone mt-1">{ex.message}</p>}
-                      <p className="text-xs text-stone/60 mt-1">Адресов: {ex.address_ids.length}</p>
-                    </div>
-                    <button type="button" onClick={() => api.toggleException(ex.id).then(loadSchedule).catch((e) => toast.error(e.message))} className="text-sm text-accent hover:underline shrink-0">
-                      {ex.is_active ? 'Отключить' : 'Включить'}
+          )}
+
+          {scheduleBlocks.length === 0 && !blockEditor && (
+            <div className="card p-10 text-center text-stone/60">
+              График пуст. Нажмите «День доставки», чтобы добавить первый маршрут.
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {scheduleBlocks.map((block) => (
+              <div
+                key={block.slot_date}
+                className="card overflow-hidden border-l-4 border-accent hover:shadow-md transition-shadow"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 bg-sand/30 border-b border-sand">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-stone/60 font-medium">День доставки</p>
+                    <p className="font-semibold text-lg">{formatDate(block.slot_date)}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => openEditBlock(block)} className="btn-secondary !px-3 !py-1.5 text-sm">
+                      Изменить
+                    </button>
+                    <button type="button" onClick={() => setDeleteBlockDate(block.slot_date)} className="text-sm text-red-400 hover:underline px-2 py-1.5">
+                      Удалить
                     </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          </section>
+                <div className="divide-y divide-sand/80">
+                  {[...block.entries].sort((a, b) => a.delivery_time.localeCompare(b.delivery_time)).map((entry) => (
+                    <div key={entry.id} className="flex items-center gap-4 px-5 py-3">
+                      <span className="font-mono text-sm font-semibold text-accent w-14 shrink-0">{entry.delivery_time}</span>
+                      <span className="text-sm text-ink/90">{entry.address}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <ConfirmModal
+            isOpen={!!deleteBlockDate}
+            title="Удалить день доставки?"
+            message={`Все адреса и время на ${deleteBlockDate ? formatDate(deleteBlockDate) : ''} будут удалены из графика.`}
+            onConfirm={confirmDeleteBlock}
+            onCancel={() => setDeleteBlockDate(null)}
+            confirmText="Удалить"
+            danger
+          />
         </div>
       )}
 

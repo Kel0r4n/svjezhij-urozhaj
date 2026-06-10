@@ -14,6 +14,7 @@ from .models import (
     ProductCategory,
     User,
 )
+from .schedule_blocks import ensure_delivery_date
 
 SEED_CATEGORIES = [
     ("fruits", "Фрукты", "#A8B5A0", 1),
@@ -91,8 +92,7 @@ def run_seed(*, reset: bool = False) -> bool:
         for row in addr_rows:
             db.refresh(row)
 
-        today = date.today()
-        route_day = today + timedelta(days=3)
+        route_day = date.today() + timedelta(days=3)
         for i, row in enumerate(addr_rows):
             db.add(DeliveryScheduleSlot(
                 delivery_address_id=row.id,
@@ -100,10 +100,7 @@ def run_seed(*, reset: bool = False) -> bool:
                 delivery_time=f"{18 + i}:00",
             ))
         db.commit()
-
-        today = date.today()
-        for i in range(1, 8):
-            db.add(DeliveryDate(delivery_date=today + timedelta(days=i)))
+        ensure_delivery_date(db, route_day)
         db.commit()
 
         for slug, label, chart_color, sort_order in SEED_CATEGORIES:
@@ -140,11 +137,11 @@ def run_seed(*, reset: bool = False) -> bool:
             (7, OrderStatus.CREATED, [(by_name["Абрикос"], 2)]),
         ]
 
-        ddates = db.query(DeliveryDate).all()
+        route_dd = db.query(DeliveryDate).filter(DeliveryDate.delivery_date == route_day).first()
         for days_ago, status, items in demo:
             total = sum(p.price * q for p, q in items)
             created = now - timedelta(days=days_ago)
-            dslot = ddates[days_ago % len(ddates)]
+            dslot = route_dd
             order = Order(
                 user_id=user.id,
                 status=status,

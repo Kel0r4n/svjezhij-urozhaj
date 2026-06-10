@@ -7,25 +7,24 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..models import (
-    Order, OrderItem, OrderStatus, Product, ProductCategory, User, DeliveryAddress, DeliveryDate,
-    DeliveryScheduleSlot, DeliveryException, DeliveryExceptionAddress, UserEvent,
+    Order, OrderItem, OrderStatus, Product, ProductCategory, User, DeliveryAddress,
+    DeliveryScheduleSlot, UserEvent,
 )
 from ..schemas import (
     DashboardStats, AdminOrderResponse, AdminOrderListResponse, OrderStatusUpdate,
     AdminUserResponse, AdminUserDetailResponse, StockBulkUpdateRequest, ProductResponse, SalesAnalyticsResponse,
-    DeliveryAddressCreate, DeliveryAddressResponse, DeliveryDateCreate, DeliveryDateResponse,
+    DeliveryAddressCreate, DeliveryAddressResponse,
     DayDetailResponse, CategoryCreate, CategoryUpdate, CategoryResponse,
-    DeliveryScheduleSlotCreate, DeliveryScheduleSlotResponse,
-    DeliveryExceptionCreate, DeliveryExceptionResponse,
     DeliveryManifestResponse, DeliveryManifestRow,
     UserEventCreate, UserEventResponse,
-    ScheduleImportRequest, DeliveryRouteResponse, DeliveryRouteStop,
+    DeliveryRouteResponse, DeliveryRouteStop,
+    ScheduleBlockSave, ScheduleBlockResponse, ScheduleBlockEntryResponse,
 )
 from ..auth import get_current_admin
 from ..utils import get_dashboard_stats, get_sales_analytics, get_day_detail
 from ..search_utils import apply_user_search
 from ..export_utils import build_manifest_rows, manifest_to_xlsx
-from ..schedule_import import import_schedule_text
+from ..schedule_blocks import list_schedule_blocks, save_schedule_block, delete_schedule_block
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -152,42 +151,6 @@ def delete_address(addr_id: int, db: Session = Depends(get_db), _=Depends(get_cu
     if not addr:
         raise HTTPException(status_code=404, detail="Адрес не найден")
     db.delete(addr)
-    db.commit()
-
-
-@router.get("/delivery-dates", response_model=list[DeliveryDateResponse])
-def admin_list_dates(db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    return db.query(DeliveryDate).order_by(DeliveryDate.delivery_date).all()
-
-
-@router.post("/delivery-dates", response_model=DeliveryDateResponse, status_code=201)
-def create_delivery_date(data: DeliveryDateCreate, db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    if db.query(DeliveryDate).filter(DeliveryDate.delivery_date == data.delivery_date).first():
-        raise HTTPException(status_code=400, detail="Дата уже существует")
-    d = DeliveryDate(delivery_date=data.delivery_date)
-    db.add(d)
-    db.commit()
-    db.refresh(d)
-    return d
-
-
-@router.patch("/delivery-dates/{date_id}/toggle", response_model=DeliveryDateResponse)
-def toggle_delivery_date(date_id: int, db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    d = db.query(DeliveryDate).filter(DeliveryDate.id == date_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Дата не найдена")
-    d.is_active = not d.is_active
-    db.commit()
-    db.refresh(d)
-    return d
-
-
-@router.delete("/delivery-dates/{date_id}", status_code=204)
-def delete_delivery_date(date_id: int, db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    d = db.query(DeliveryDate).filter(DeliveryDate.id == date_id).first()
-    if not d:
-        raise HTTPException(status_code=404, detail="Дата не найдена")
-    db.delete(d)
     db.commit()
 
 
@@ -400,42 +363,38 @@ def export_delivery_manifest(
     )
 
 
-@router.get("/schedule", response_model=list[DeliveryScheduleSlotResponse])
-def list_schedule(db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    return db.query(DeliveryScheduleSlot).order_by(
-        DeliveryScheduleSlot.slot_date, DeliveryScheduleSlot.delivery_time
-    ).all()
-
-
-@router.post("/schedule", response_model=DeliveryScheduleSlotResponse, status_code=201)
-def create_schedule_slot(
-    data: DeliveryScheduleSlotCreate,
-    db: Session = Depends(get_db),
-    _=Depends(get_current_admin),
-):
-    addr = db.query(DeliveryAddress).filter(DeliveryAddress.id == data.delivery_address_id).first()
-    if not addr:
-        raise HTTPException(status_code=404, detail="Адрес не найден")
-    parts = data.delivery_time.split(":")
-    delivery_time = f"{int(parts[0]):02d}:{parts[1]}"
-    slot = DeliveryScheduleSlot(
-        delivery_address_id=data.delivery_address_id,
-        slot_date=data.slot_date,
-        delivery_time=delivery_time,
+def _block_response(block: dict) -> ScheduleBlockResponse:
+    return ScheduleBlockResponse(
+        slot_date=block["slot_date"],
+        entries=[ScheduleBlockEntryResponse(**e) for e in block["entries"]],
     )
-    db.add(slot)
-    db.commit()
-    db.refresh(slot)
-    return slot
 
 
-@router.post("/schedule/import")
-def import_schedule(
-    data: ScheduleImportRequest,
+@router.get("/schedule/blocks", response_model=list[ScheduleBlockResponse])
+def list_schedule_block_views(db: Session = Depends(get_db), _=Depends(get_current_admin)):
+    return [_block_response(b) for b in list_schedule_blocks(db)]
+
+
+@router.put("/schedule/blocks", response_model=ScheduleBlockResponse)
+def upsert_schedule_block(
+    data: ScheduleBlockSave,
     db: Session = Depends(get_db),
     _=Depends(get_current_admin),
 ):
-    return import_schedule_text(db, data.route_date, data.text)
+    entries = [e.model_dump() for e in data.entries]
+    block = save_schedule_block(
+        db, data.slot_date, entries, previous_date=data.previous_date,
+    )
+    return _block_response(block)
+
+
+@router.delete("/schedule/blocks/{route_date}", status_code=204)
+def remove_schedule_block(
+    route_date: date,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    delete_schedule_block(db, route_date)
 
 
 @router.get("/deliveries/route", response_model=DeliveryRouteResponse)
@@ -465,92 +424,6 @@ def delivery_route(
             items_count=items_count,
         ))
     return DeliveryRouteResponse(date=day, stops=stops)
-
-
-@router.delete("/schedule/{slot_id}", status_code=204)
-def delete_schedule_slot(slot_id: int, db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    slot = db.query(DeliveryScheduleSlot).filter(DeliveryScheduleSlot.id == slot_id).first()
-    if not slot:
-        raise HTTPException(status_code=404, detail="Слот не найден")
-    db.delete(slot)
-    db.commit()
-
-
-@router.get("/exceptions", response_model=list[DeliveryExceptionResponse])
-def list_exceptions(db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    rows = db.query(DeliveryException).order_by(DeliveryException.exception_date.desc()).all()
-    result = []
-    for exc in rows:
-        addr_ids = [
-            r.delivery_address_id
-            for r in db.query(DeliveryExceptionAddress).filter(
-                DeliveryExceptionAddress.exception_id == exc.id
-            ).all()
-        ]
-        result.append(DeliveryExceptionResponse(
-            id=exc.id,
-            exception_date=exc.exception_date,
-            action=exc.action,
-            new_date=exc.new_date,
-            message=exc.message,
-            is_active=exc.is_active,
-            address_ids=addr_ids,
-        ))
-    return result
-
-
-@router.post("/exceptions", response_model=DeliveryExceptionResponse, status_code=201)
-def create_exception(
-    data: DeliveryExceptionCreate,
-    db: Session = Depends(get_db),
-    _=Depends(get_current_admin),
-):
-    if data.action == "postponed" and not data.new_date:
-        raise HTTPException(status_code=400, detail="Укажите новую дату для переноса")
-    exc = DeliveryException(
-        exception_date=data.exception_date,
-        action=data.action,
-        new_date=data.new_date,
-        message=data.message,
-    )
-    db.add(exc)
-    db.flush()
-    for aid in data.address_ids:
-        db.add(DeliveryExceptionAddress(exception_id=exc.id, delivery_address_id=aid))
-    db.commit()
-    return DeliveryExceptionResponse(
-        id=exc.id,
-        exception_date=exc.exception_date,
-        action=exc.action,
-        new_date=exc.new_date,
-        message=exc.message,
-        is_active=exc.is_active,
-        address_ids=data.address_ids,
-    )
-
-
-@router.patch("/exceptions/{exc_id}/toggle", response_model=DeliveryExceptionResponse)
-def toggle_exception(exc_id: int, db: Session = Depends(get_db), _=Depends(get_current_admin)):
-    exc = db.query(DeliveryException).filter(DeliveryException.id == exc_id).first()
-    if not exc:
-        raise HTTPException(status_code=404, detail="Исключение не найдено")
-    exc.is_active = not exc.is_active
-    db.commit()
-    addr_ids = [
-        r.delivery_address_id
-        for r in db.query(DeliveryExceptionAddress).filter(
-            DeliveryExceptionAddress.exception_id == exc.id
-        ).all()
-    ]
-    return DeliveryExceptionResponse(
-        id=exc.id,
-        exception_date=exc.exception_date,
-        action=exc.action,
-        new_date=exc.new_date,
-        message=exc.message,
-        is_active=exc.is_active,
-        address_ids=addr_ids,
-    )
 
 
 @router.post("/users/{user_id}/events", response_model=UserEventResponse, status_code=201)

@@ -127,8 +127,6 @@ export const api = {
   deleteCategory: (id) => request(`/admin/categories/${id}`, { method: 'DELETE' }),
 
   getDeliveryAddresses: () => request('/delivery/addresses'),
-  getDeliveryDates: () => request('/delivery/dates'),
-
   getCart: () => request('/cart'),
   addToCart: (data) => request('/cart', { method: 'POST', body: JSON.stringify(data) }),
   updateCartItem: (id, data) => request(`/cart/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -189,17 +187,13 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  getSchedule: () => request('/admin/schedule'),
-  createScheduleSlot: (data) => request('/admin/schedule', { method: 'POST', body: JSON.stringify(data) }),
-  deleteScheduleSlot: (id) => request(`/admin/schedule/${id}`, { method: 'DELETE' }),
-  getExceptions: () => request('/admin/exceptions'),
-  createException: (data) => request('/admin/exceptions', { method: 'POST', body: JSON.stringify(data) }),
-  toggleException: (id) => request(`/admin/exceptions/${id}/toggle`, { method: 'PATCH' }),
+  getScheduleBlocks: () => request('/admin/schedule/blocks'),
+  saveScheduleBlock: (data) => request('/admin/schedule/blocks', { method: 'PUT', body: JSON.stringify(data) }),
+  deleteScheduleBlock: (routeDate) => request(`/admin/schedule/blocks/${routeDate}`, { method: 'DELETE' }),
 
   getDeliveryNext: (addressId) => request(`/delivery/next/${addressId}`),
   getDeliveryUpcoming: (addressId) => request(`/delivery/upcoming/${addressId}`),
   getDeliveryRoute: (day) => request(`/admin/deliveries/route?day=${day}`),
-  importSchedule: (data) => request('/admin/schedule/import', { method: 'POST', body: JSON.stringify(data) }),
   toggleAdmin: (id) => request(`/admin/users/${id}/admin`, { method: 'PATCH' }),
   bulkUpdateStock: (items) => request('/admin/stock/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
 
@@ -208,10 +202,6 @@ export const api = {
   toggleAddress: (id) => request(`/admin/addresses/${id}/toggle`, { method: 'PATCH' }),
   deleteAddress: (id) => request(`/admin/addresses/${id}`, { method: 'DELETE' }),
 
-  getAdminDeliveryDates: () => request('/admin/delivery-dates'),
-  createDeliveryDate: (delivery_date) => request('/admin/delivery-dates', { method: 'POST', body: JSON.stringify({ delivery_date }) }),
-  toggleDeliveryDate: (id) => request(`/admin/delivery-dates/${id}/toggle`, { method: 'PATCH' }),
-  deleteDeliveryDate: (id) => request(`/admin/delivery-dates/${id}`, { method: 'DELETE' }),
 };
 
 export { ApiError };
