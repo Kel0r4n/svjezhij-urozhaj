@@ -6,6 +6,7 @@ backend/venv/
 backend/__pycache__/
 backend/**/__pycache__/
 backend/shop.db
+backend/tests/_pytest.db
 backend/uploads/
 frontend/node_modules/
 frontend/dist/

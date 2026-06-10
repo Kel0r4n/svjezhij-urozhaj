@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..models import (
-    Order, OrderItem, OrderStatus, Product, User, DeliveryAddress, DeliveryDate,
+    Order, OrderItem, OrderStatus, Product, ProductCategory, User, DeliveryAddress, DeliveryDate,
     DeliveryScheduleSlot, DeliveryException, DeliveryExceptionAddress, UserEvent,
 )
 from ..schemas import (

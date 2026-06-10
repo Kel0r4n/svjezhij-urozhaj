@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -97,12 +97,10 @@ async def sqlalchemy_exception_handler(_request: Request, exc: SQLAlchemyError):
     return JSONResponse(status_code=500, content={"detail": "Ошибка базы данных"})
 
 
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(_request: Request, exc: Exception):
-    if isinstance(exc, HTTPException):
-        raise exc
-    logger.exception("Unhandled error: %s", exc)
-    return JSONResponse(status_code=500, content={"detail": "Внутренняя ошибка сервера"})
+@app.exception_handler(ResponseValidationError)
+async def response_validation_exception_handler(_request: Request, exc: ResponseValidationError):
+    logger.exception("ResponseValidationError: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Ошибка формата ответа сервера"})
 
 
 @app.exception_handler(RequestValidationError)
