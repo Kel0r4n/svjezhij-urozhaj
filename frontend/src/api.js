@@ -63,9 +63,20 @@ function extractErrorMessage(data) {
 
 async function handleResponse(res) {
   if (res.status === 204) return null;
-  const data = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (!res.ok) {
+        throw new ApiError(text.slice(0, 200) || `Ошибка сервера (${res.status})`, res.status);
+      }
+      throw new ApiError('Некорректный ответ сервера', res.status);
+    }
+  }
   if (!res.ok) {
-    throw new ApiError(extractErrorMessage(data), res.status);
+    throw new ApiError(extractErrorMessage(data) || `Ошибка сервера (${res.status})`, res.status);
   }
   return data;
 }

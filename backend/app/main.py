@@ -3,11 +3,16 @@ import re
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+import logging
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+logger = logging.getLogger(__name__)
 from .database import Base, engine, settings
 from .migrate import run_migrations
 from .routers import admin, cart, categories, delivery, orders, products, users
@@ -74,6 +79,32 @@ app.include_router(delivery.router)
 app.include_router(categories.router)
 
 
+_API_PREFIXES = (
+    "admin", "users", "products", "orders", "cart", "delivery", "categories",
+    "health", "docs", "openapi.json", "uploads", "auth",
+)
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_exception_handler(_request: Request, exc: IntegrityError):
+    logger.exception("IntegrityError: %s", exc)
+    return JSONResponse(status_code=400, content={"detail": "Запись уже существует или данные некорректны"})
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(_request: Request, exc: SQLAlchemyError):
+    logger.exception("SQLAlchemyError: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Ошибка базы данных"})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        raise exc
+    logger.exception("Unhandled error: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Внутренняя ошибка сервера"})
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(_request: Request, exc: RequestValidationError):
     messages = []
@@ -101,6 +132,9 @@ if FRONTEND_DIST.is_dir():
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str):
         if not serve_frontend_enabled():
+            raise HTTPException(status_code=404, detail="Not Found")
+        root = full_path.split("/")[0] if full_path else ""
+        if root in _API_PREFIXES:
             raise HTTPException(status_code=404, detail="Not Found")
         candidate = FRONTEND_DIST / full_path
         if full_path and candidate.is_file():

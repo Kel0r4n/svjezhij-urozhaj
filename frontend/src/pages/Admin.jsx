@@ -255,8 +255,8 @@ export default function Admin() {
 
   const loadAdminCategories = () => {
     api.getAdminCategories()
-      .then(setAdminCategories)
-      .catch(() => {});
+      .then((data) => setAdminCategories(Array.isArray(data) ? data : []))
+      .catch((e) => toast.error(e.message || 'Не удалось загрузить категории'));
   };
 
   const loadStock = () => {

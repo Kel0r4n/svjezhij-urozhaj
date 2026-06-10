@@ -15,7 +15,7 @@ if [ -z "$SECRET_KEY" ] || [ "$SECRET_KEY" = "dev-secret-key-change-me" ]; then
 fi
 
 echo "[entrypoint] Миграции БД (Alembic)..."
-python -c "from app.migrate import run_migrations; run_migrations()" || echo "[WARN] Alembic не применён"
+python -c "from app.migrate import run_migrations; run_migrations()"
 
 if [ "$RUN_SEED" = "1" ]; then
   echo "[entrypoint] Заполнение БД (RUN_SEED=1)..."

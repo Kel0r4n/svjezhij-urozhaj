@@ -3,13 +3,12 @@
 from io import BytesIO
 from typing import Any
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, Side
-
 HEADERS = ["Контакт", "Телефон", "Товар", "Цена", "Количество", "ЖК"]
 
 
 def _thin_border():
+    from openpyxl.styles import Border, Side
+
     s = Side(style="thin")
     return Border(left=s, right=s, top=s, bottom=s)
 
@@ -37,6 +36,9 @@ def build_manifest_rows(orders: list[Any]) -> list[dict]:
 
 
 def manifest_to_xlsx(rows: list[dict], sheet_title: str = "Доставки") -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+
     wb = Workbook()
     ws = wb.active
     ws.title = sheet_title[:31]

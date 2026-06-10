@@ -269,10 +269,10 @@ class CategoryResponse(BaseModel):
     id: int
     slug: str
     label: str
-    chart_color: str
-    is_active: bool
-    sort_order: int
-    created_at: datetime
+    chart_color: str = "#A8B5A0"
+    is_active: bool = True
+    sort_order: int = 0
+    created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
