@@ -1,0 +1,5 @@
+# Замените localhost на ваш домен в .env (переменная DOMAIN)
+# Для теста по IP без домена: в .env поставьте DOMAIN=:80
+{$DOMAIN} {
+	reverse_proxy app:8000
+}
