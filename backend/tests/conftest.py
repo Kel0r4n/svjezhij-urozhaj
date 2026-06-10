@@ -29,7 +29,7 @@ def client(seeded_db):
 
 @pytest.fixture
 def admin_headers(client):
-    r = client.post("/auth/login", json={"login": "+79001234567", "password": "admin123"})
+    r = client.post("/api/auth/login", json={"login": "+79001234567", "password": "admin123"})
     assert r.status_code == 200, r.text
     token = r.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 def test_schedule_blocks_replace_seed_day(client, admin_headers):
     """Повторное сохранение на дату из seed не должно падать с IntegrityError."""
-    listed = client.get("/admin/schedule/blocks", headers=admin_headers)
+    listed = client.get("/api/admin/schedule/blocks", headers=admin_headers)
     assert listed.status_code == 200
     blocks = listed.json()
     assert blocks, "seed должен создать график"
@@ -13,7 +13,7 @@ def test_schedule_blocks_replace_seed_day(client, admin_headers):
     addr_id = block["entries"][0]["delivery_address_id"]
 
     resp = client.put(
-        "/admin/schedule/blocks",
+        "/api/admin/schedule/blocks",
         headers=admin_headers,
         json={
             "slot_date": block["slot_date"],
@@ -26,10 +26,10 @@ def test_schedule_blocks_replace_seed_day(client, admin_headers):
 
 def test_schedule_blocks_crud(client, admin_headers):
     route_day = (date.today() + timedelta(days=10)).isoformat()
-    addr = client.get("/admin/addresses", headers=admin_headers).json()[0]
+    addr = client.get("/api/admin/addresses", headers=admin_headers).json()[0]
 
     create = client.put(
-        "/admin/schedule/blocks",
+        "/api/admin/schedule/blocks",
         headers=admin_headers,
         json={
             "slot_date": route_day,
@@ -43,7 +43,7 @@ def test_schedule_blocks_crud(client, admin_headers):
     assert create.status_code == 400
 
     create = client.put(
-        "/admin/schedule/blocks",
+        "/api/admin/schedule/blocks",
         headers=admin_headers,
         json={
             "slot_date": route_day,
@@ -55,14 +55,14 @@ def test_schedule_blocks_crud(client, admin_headers):
     assert block["slot_date"] == route_day
     assert len(block["entries"]) == 1
 
-    listed = client.get("/admin/schedule/blocks", headers=admin_headers)
+    listed = client.get("/api/admin/schedule/blocks", headers=admin_headers)
     assert listed.status_code == 200
     dates = [b["slot_date"] for b in listed.json()]
     assert route_day in dates
 
     new_day = (date.today() + timedelta(days=11)).isoformat()
     updated = client.put(
-        "/admin/schedule/blocks",
+        "/api/admin/schedule/blocks",
         headers=admin_headers,
         json={
             "slot_date": new_day,
@@ -73,5 +73,5 @@ def test_schedule_blocks_crud(client, admin_headers):
     assert updated.status_code == 200
     assert updated.json()["slot_date"] == new_day
 
-    deleted = client.delete(f"/admin/schedule/blocks/{new_day}", headers=admin_headers)
+    deleted = client.delete(f"/api/admin/schedule/blocks/{new_day}", headers=admin_headers)
     assert deleted.status_code == 204

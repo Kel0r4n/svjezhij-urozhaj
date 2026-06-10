@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 import logging
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -68,30 +68,18 @@ if FRONTEND_DIST.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend_assets")
 
 
-@app.middleware("http")
-async def strip_api_prefix(request: Request, call_next):
-    """Фронтенд в проде ходит на /api/* (VITE_API_URL=/api) — всегда снимаем префикс."""
-    path = request.scope["path"]
-    if path == "/api":
-        request.scope["path"] = "/"
-    elif path.startswith("/api/"):
-        request.scope["path"] = path[4:]
-    return await call_next(request)
+# API только под /api — страницы /admin, /cart, /orders отдаёт SPA
+api_router = APIRouter()
+api_router.include_router(users.router)
+api_router.include_router(users.profile_router)
+api_router.include_router(products.router)
+api_router.include_router(cart.router)
+api_router.include_router(orders.router)
+api_router.include_router(admin.router)
+api_router.include_router(delivery.router)
+api_router.include_router(categories.router)
+app.include_router(api_router, prefix="/api")
 
-app.include_router(users.router)
-app.include_router(users.profile_router)
-app.include_router(products.router)
-app.include_router(cart.router)
-app.include_router(orders.router)
-app.include_router(admin.router)
-app.include_router(delivery.router)
-app.include_router(categories.router)
-
-
-_API_PREFIXES = (
-    "api", "admin", "users", "products", "orders", "cart", "delivery", "categories",
-    "health", "docs", "openapi.json", "uploads", "auth",
-)
 
 
 @app.exception_handler(IntegrityError)
@@ -123,6 +111,7 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
 
 
 @app.get("/health")
+@app.get("/api/health")
 def health():
     return {"status": "ok"}
 
@@ -140,9 +129,10 @@ if FRONTEND_DIST.is_dir():
     async def spa_fallback(full_path: str):
         if not serve_frontend_enabled():
             raise HTTPException(status_code=404, detail="Not Found")
-        root = full_path.split("/")[0] if full_path else ""
-        if root in _API_PREFIXES:
+
+        if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not Found")
+
         candidate = FRONTEND_DIST / full_path
         if full_path and candidate.is_file():
             return FileResponse(candidate)

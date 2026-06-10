@@ -2,7 +2,7 @@
 
 
 def test_admin_dashboard(client, admin_headers):
-    r = client.get("/admin/dashboard", headers=admin_headers)
+    r = client.get("/api/admin/dashboard", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "orders_today" in data
@@ -12,7 +12,7 @@ def test_admin_dashboard(client, admin_headers):
 
 
 def test_admin_categories_list(client, admin_headers):
-    r = client.get("/admin/categories", headers=admin_headers)
+    r = client.get("/api/admin/categories", headers=admin_headers)
     assert r.status_code == 200
     cats = r.json()
     assert isinstance(cats, list)
@@ -22,7 +22,7 @@ def test_admin_categories_list(client, admin_headers):
 
 def test_admin_category_crud(client, admin_headers):
     create = client.post(
-        "/admin/categories",
+        "/api/admin/categories",
         headers=admin_headers,
         json={"slug": "test_cat", "label": "Тестовая", "chart_color": "#AABBCC", "sort_order": 99},
     )
@@ -31,24 +31,24 @@ def test_admin_category_crud(client, admin_headers):
     assert cat["slug"] == "test_cat"
     assert cat["label"] == "Тестовая"
 
-    listed = client.get("/admin/categories", headers=admin_headers)
+    listed = client.get("/api/admin/categories", headers=admin_headers)
     slugs = [c["slug"] for c in listed.json()]
     assert "test_cat" in slugs
 
     updated = client.patch(
-        f"/admin/categories/{cat['id']}",
+        f"/api/admin/categories/{cat['id']}",
         headers=admin_headers,
         json={"label": "Тест обновлён"},
     )
     assert updated.status_code == 200
     assert updated.json()["label"] == "Тест обновлён"
 
-    deleted = client.delete(f"/admin/categories/{cat['id']}", headers=admin_headers)
+    deleted = client.delete(f"/api/admin/categories/{cat['id']}", headers=admin_headers)
     assert deleted.status_code == 204
 
 
 def test_admin_products_with_auth(client, admin_headers):
-    r = client.get("/products?include_inactive=true", headers=admin_headers)
+    r = client.get("/api/products?include_inactive=true", headers=admin_headers)
     assert r.status_code == 200
     products = r.json()
     assert isinstance(products, list)
@@ -60,7 +60,7 @@ def test_admin_products_with_auth(client, admin_headers):
 
 def test_admin_create_product(client, admin_headers):
     r = client.post(
-        "/products",
+        "/api/products",
         headers=admin_headers,
         json={
             "name": "Тестовый товар",
@@ -77,7 +77,7 @@ def test_admin_create_product(client, admin_headers):
 
 
 def test_admin_sales_analytics(client, admin_headers):
-    r = client.get("/admin/analytics/sales?days=30", headers=admin_headers)
+    r = client.get("/api/admin/analytics/sales?days=30", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "days" in data
@@ -85,5 +85,5 @@ def test_admin_sales_analytics(client, admin_headers):
 
 
 def test_admin_requires_auth(client):
-    r = client.get("/admin/dashboard")
+    r = client.get("/api/admin/dashboard")
     assert r.status_code == 403 or r.status_code == 401

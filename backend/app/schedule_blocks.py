@@ -1,5 +1,6 @@
 """График доставки: день (блок) → список пар «время + адрес»."""
 
+import logging
 from datetime import date
 
 from fastapi import HTTPException
@@ -7,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import DeliveryAddress, DeliveryDate, DeliveryScheduleSlot
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_time(value: str) -> str:
@@ -29,10 +32,12 @@ def ensure_delivery_date(db: Session, delivery_day: date) -> DeliveryDate:
 
 
 def _clear_slots_for_dates(db: Session, dates: set[date]) -> None:
-    for d in dates:
-        db.query(DeliveryScheduleSlot).filter(
-            DeliveryScheduleSlot.slot_date == d,
-        ).delete(synchronize_session=False)
+    """ORM-удаление (надёжнее bulk delete с PostgreSQL + identity map)."""
+    if not dates:
+        return
+    slots = db.query(DeliveryScheduleSlot).filter(DeliveryScheduleSlot.slot_date.in_(dates)).all()
+    for slot in slots:
+        db.delete(slot)
     db.flush()
 
 
@@ -90,11 +95,13 @@ def save_schedule_block(
 
         ensure_delivery_date(db, slot_date)
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
+        logger.exception("schedule block save IntegrityError: %s", exc)
         raise HTTPException(
             status_code=400,
-            detail="Этот адрес уже есть в графике на выбранную дату. Измените день или выберите другой ЖК.",
+            detail="Не удалось сохранить график: адрес уже занят на эту дату. "
+                   "Попробуйте изменить дату или выберите другой ЖК.",
         )
 
     blocks = list_schedule_blocks(db)
@@ -105,10 +112,9 @@ def save_schedule_block(
 
 
 def delete_schedule_block(db: Session, slot_date: date) -> None:
-    deleted = db.query(DeliveryScheduleSlot).filter(
-        DeliveryScheduleSlot.slot_date == slot_date,
-    ).delete(synchronize_session=False)
-    db.flush()
-    if not deleted:
+    slots = db.query(DeliveryScheduleSlot).filter(DeliveryScheduleSlot.slot_date == slot_date).all()
+    if not slots:
         raise HTTPException(status_code=404, detail="День доставки не найден")
+    for slot in slots:
+        db.delete(slot)
     db.commit()

@@ -11,12 +11,12 @@ def test_root(client):
 
 
 def test_products_list(client):
-    r = client.get("/products")
+    r = client.get("/api/products")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
 def test_categories_list(client):
-    r = client.get("/categories")
+    r = client.get("/api/categories")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
